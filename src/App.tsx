@@ -131,13 +131,41 @@ export default function App() {
   const [inputPlaceholder, setInputPlaceholder] = useState('Type your response…');
   const chatInputRef = useRef<HTMLInputElement>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef<boolean>(true);
 
-  // Auto-scroll chat to latest message / recommendation card
+  // Monitor user scrolling: if user scrolls up, do not force scroll down on new messages
+  const handleChatScroll = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceToBottom < 80;
+  }, []);
+
+  // Auto-scroll chat to latest message only if user is already near bottom
   useEffect(() => {
-    if (isChatOpen) {
-      chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!isChatOpen) return;
+    if (isNearBottomRef.current) {
+      const timer = setTimeout(() => {
+        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 50);
+      return () => clearTimeout(timer);
     }
   }, [chatMessages, isChatOpen]);
+
+  // Adjust scroll when virtual keyboard / visualViewport shifts
+  useEffect(() => {
+    if (!isChatOpen || typeof window === 'undefined' || !window.visualViewport) return;
+    const handleViewportChange = () => {
+      if (isNearBottomRef.current) {
+        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    };
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleViewportChange);
+    };
+  }, [isChatOpen]);
 
   // Push / Care message toggle
   const [showPushMessage, setShowPushMessage] = useState(false);
@@ -161,6 +189,7 @@ export default function App() {
   const handleInitialPlanB = () => {
     setShowPlanBHint(false);
     setInputPlaceholder('Tell Nova what changed…');
+    isNearBottomRef.current = true;
     setChatMessages([
       {
         id: 'msg-init-alt',
@@ -190,6 +219,7 @@ export default function App() {
   // Click "Plan B" on already accepted plan: Proactively offers alternative while keeping current plan until accepted
   const handleAcceptedPlanB = () => {
     setInputPlaceholder('Tell Nova what changed…');
+    isNearBottomRef.current = true;
     const alternative = currentPlan.id === 'walk' ? STRETCH_PLAN : TOMORROW_WALK_PLAN;
     const alternativeText = currentPlan.id === 'walk'
       ? 'How about a 5-minute stretch at home instead?'
@@ -223,6 +253,7 @@ export default function App() {
   // "Not today" on accepted plan: opens dialogue without auto-modifying or canceling
   const handleNotToday = () => {
     setInputPlaceholder('Tell Nova what changed…');
+    isNearBottomRef.current = true;
     setChatMessages([
       {
         id: 'msg-not-today',
@@ -250,6 +281,7 @@ export default function App() {
 
   // 3. Option Action Handler inside chat
   const handleOptionClick = (option: ChatActionOption, messageId?: string) => {
+    isNearBottomRef.current = true;
     if (option.action === 'accept' && option.targetPlan) {
       // User accepts alternative: update plan in background, switch to accepted state, keep drawer open
       hasCompletedRef.current = false;
@@ -260,7 +292,7 @@ export default function App() {
 
       // Determine Nova confirmation copy matching the accepted alternative
       let replyText = 'Sounds good. I’ve added the 5-minute stretch to your plan.';
-      if (option.targetPlan.id === 'tomorrow_walk') {
+      if (option.targetPlan.id === 'tomorrow' || option.targetPlan.id === 'tomorrow_walk') {
         replyText = 'Sounds good. I’ve moved your walk to tomorrow.';
       } else if (option.targetPlan.id === 'rest') {
         replyText = 'Sounds good. I’ve updated today to a rest day.';
@@ -298,7 +330,7 @@ export default function App() {
             : { ...m, disabled: true }
         );
         const hasTomorrowWalk = prev.some((m) =>
-          m.options?.some((o) => o.targetPlan?.id === 'tomorrow_walk')
+          m.options?.some((o) => o.targetPlan?.id === 'tomorrow' || o.targetPlan?.id === 'tomorrow_walk')
         );
 
         const nextAiMsg: ChatMessage = !hasTomorrowWalk
@@ -352,6 +384,7 @@ export default function App() {
     } else if (option.action === 'focus_input') {
       // Keep conversation open, disable option card, Nova replies with pure prompt, focus input
       setInputPlaceholder('Tell Nova what changed…');
+      isNearBottomRef.current = true;
       const now = Date.now();
       setChatMessages((prev) => [
         ...prev.map((m) =>
@@ -372,8 +405,8 @@ export default function App() {
       ]);
       setTimeout(() => {
         chatInputRef.current?.focus();
-        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 150);
+        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 120);
     } else if (option.action === 'keep_plan') {
       setChatMessages((prev) =>
         prev.map((m) =>
@@ -392,6 +425,7 @@ export default function App() {
     if (!sheetInput.trim()) return;
     const text = sheetInput.trim();
     setSheetInput('');
+    isNearBottomRef.current = true;
 
     setChatMessages((prev) => [
       ...prev.map((m) => ({ ...m, disabled: true })),
@@ -1078,7 +1112,11 @@ export default function App() {
               </div>
 
               {/* Chat Messages Body */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5 text-xs leading-relaxed">
+              <div 
+                ref={chatContainerRef}
+                onScroll={handleChatScroll}
+                className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-3.5 text-xs leading-relaxed"
+              >
                 {chatMessages.map((msg) => {
                   // If AI message has options, render as a genuine frosted chat bubble
                   if (msg.sender === 'ai' && msg.options && msg.options.length > 0) {
@@ -1087,40 +1125,38 @@ export default function App() {
                         key={msg.id}
                         className="flex flex-col items-start transition-opacity duration-200"
                       >
-                        <div className="max-w-[85%] bg-white/85 backdrop-blur-md rounded-[22px] rounded-bl-xs border border-white/90 p-4 shadow-[0_2px_12px_rgba(90,80,140,0.04)] space-y-3">
+                        <div className="max-w-[85%] bg-white/85 backdrop-blur-md rounded-[22px] rounded-bl-xs border border-white/90 p-4 shadow-[0_2px_12px_rgba(90,80,140,0.04)] space-y-2.5">
                           {/* Suggestion Text */}
                           <p className="text-[13.5px] leading-relaxed text-[#26263F]">
                             {msg.text}
                           </p>
 
-                          {/* Action Options inside bubble */}
-                          <div className="flex flex-col items-start gap-2 pt-1">
-                            {msg.options.map((opt, optIdx) => {
-                              const isSelected = Boolean(msg.disabled && msg.selectedOptionLabel === opt.label);
-                              const isOtherDisabled = Boolean(msg.disabled && !isSelected);
-
-                              return (
+                          {/* Action Options: If active (not disabled), show all selectable options */}
+                          {!msg.disabled && (
+                            <div className="flex flex-col items-start gap-2 pt-1">
+                              {msg.options.map((opt, optIdx) => (
                                 <button
                                   key={optIdx}
                                   type="button"
-                                  disabled={msg.disabled}
                                   onClick={() => handleOptionClick(opt, msg.id)}
-                                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[18px] border text-xs font-semibold text-left transition-all select-none min-h-[38px] ${
-                                    isSelected
-                                      ? 'border-[#5E5BAE] bg-[#EBE7FA] text-[#46437B] cursor-default'
-                                      : isOtherDisabled
-                                      ? 'border-white/60 bg-white/40 text-[#9A98B0] opacity-50 cursor-default'
-                                      : 'border-white/90 bg-[#F4F1FD]/85 hover:bg-[#ECE7FB] active:scale-[0.98] text-[#46437B] shadow-2xs cursor-pointer'
-                                  }`}
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[18px] border border-white/90 bg-[#F4F1FD]/85 hover:bg-[#ECE7FB] active:scale-[0.98] text-[#46437B] text-xs font-semibold text-left transition-all select-none min-h-[38px] shadow-2xs cursor-pointer"
                                 >
-                                  {isSelected && (
-                                    <Check className="w-3.5 h-3.5 stroke-[2.5] text-[#5E5BAE]" />
-                                  )}
                                   <span>{opt.label}</span>
                                 </button>
-                              );
-                            })}
-                          </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* If handled/disabled message: unselected operations are collapsed.
+                              Only the chosen option (if any) is shown as a subtle, non-clickable status chip. */}
+                          {msg.disabled && msg.selectedOptionLabel && (
+                            <div className="pt-0.5">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[14px] border border-[#5E5BAE]/20 bg-[#EBE7FA]/80 text-[11.5px] font-medium text-[#46437B] select-none cursor-default">
+                                <Check className="w-3 h-3 stroke-[2.5] text-[#5E5BAE]" />
+                                <span>{msg.selectedOptionLabel}</span>
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1150,7 +1186,7 @@ export default function App() {
               {/* Chat Input Bar inside sheet with Home Indicator safe area */}
               <form
                 onSubmit={handleSendChatMessage}
-                className="p-4 pb-6 border-t border-[#26263F]/[0.05] bg-[#FAF8FD]/90 backdrop-blur-md shrink-0 flex flex-col gap-2"
+                className="p-4 pb-6 border-t border-[#26263F]/[0.05] bg-[#FAF8FD]/95 backdrop-blur-md shrink-0 flex flex-col gap-2"
               >
                 <div className="bg-white/80 backdrop-blur-sm rounded-full px-4 py-2.5 flex items-center gap-2 border border-white/85 shadow-2xs focus-within:border-[#5E5BAE]/60 focus-within:ring-2 focus-within:ring-[#5E5BAE]/15 transition-all">
                   <input
@@ -1159,8 +1195,9 @@ export default function App() {
                     value={sheetInput}
                     onChange={(e) => setSheetInput(e.target.value)}
                     onFocus={() => {
+                      isNearBottomRef.current = true;
                       setTimeout(() => {
-                        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
                       }, 150);
                     }}
                     placeholder={inputPlaceholder}
