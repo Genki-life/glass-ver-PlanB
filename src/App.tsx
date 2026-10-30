@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { 
   MessageSquare, 
   Mic, 
@@ -133,6 +134,47 @@ export default function App() {
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef<boolean>(true);
+
+  // Layout and transition geometry refs
+  const phoneFrameRef = useRef<HTMLDivElement>(null);
+  const homeAvatarRef = useRef<HTMLDivElement>(null);
+  const shouldReduceMotion = useReducedMotion();
+
+  const [frameSize, setFrameSize] = useState<{ width: number; height: number }>({ width: 393, height: 844 });
+  const [homeAvatarRect, setHomeAvatarRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  const measurePositions = useCallback(() => {
+    if (homeAvatarRef.current && phoneFrameRef.current) {
+      const fRect = phoneFrameRef.current.getBoundingClientRect();
+      const hRect = homeAvatarRef.current.getBoundingClientRect();
+      if (fRect.width > 0 && fRect.height > 0) {
+        setFrameSize({ width: fRect.width, height: fRect.height });
+      }
+      if (hRect.width > 0 && hRect.height > 0) {
+        setHomeAvatarRect({
+          top: hRect.top - fRect.top,
+          left: hRect.left - fRect.left,
+          width: hRect.width,
+          height: hRect.height,
+        });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    measurePositions();
+    const handleResize = () => measurePositions();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [measurePositions]);
+
+  // Target coordinates for Nova docked at top edge of chat sheet
+  const drawerWidth = 128;
+  const drawerHeight = 128;
+  const drawerLeft = (frameSize.width - drawerWidth) / 2;
+  const sheetHeight = Math.min(frameSize.height * 0.74, 580);
+  const sheetTop = frameSize.height - sheetHeight;
+  const drawerTop = sheetTop - 64; // Nova peeks over the drawer edge by 64px (-top-16)
 
   // Monitor user scrolling: if user scrolls up, do not force scroll down on new messages
   const handleChatScroll = useCallback(() => {
@@ -625,7 +667,10 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#EAE6F4] via-[#EDE9F6] to-[#E5E0F2] flex items-center justify-center p-0 sm:py-6 font-sans antialiased select-none text-[#26263F]">
       {/* 393 × 852 px Native Smartphone Frame */}
-      <div className="w-full max-w-[393px] h-[100dvh] sm:h-[844px] sm:max-h-[852px] bg-[#FAF8F5] relative flex flex-col justify-between overflow-hidden sm:rounded-[44px] sm:shadow-[0_28px_72px_-16px_rgba(90,80,140,0.18)] sm:border sm:border-white/80">
+      <div 
+        ref={phoneFrameRef}
+        className="w-full max-w-[393px] h-[100dvh] sm:h-[844px] sm:max-h-[852px] bg-[#FAF8F5] relative flex flex-col justify-between overflow-hidden sm:rounded-[44px] sm:shadow-[0_28px_72px_-16px_rgba(90,80,140,0.18)] sm:border sm:border-white/80"
+      >
         
         {/* Soft Ambient Light Glows (Low-saturation, ethereal warmth & lavender mist as in reference) */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden -z-0">
@@ -638,6 +683,59 @@ export default function App() {
           {/* Central diffused light aura behind companion & card */}
           <div className="absolute top-[38%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-radial from-white/60 via-white/20 to-transparent blur-2xl" />
         </div>
+
+        {/* Unified Animated Nova Companion (Seamlessly transitions between Home & Drawer top edge) */}
+        <motion.div
+          className="absolute pointer-events-none select-none z-50 flex items-center justify-center"
+          initial={false}
+          animate={{
+            top: isChatOpen ? drawerTop : (homeAvatarRect?.top ?? 145),
+            left: isChatOpen ? drawerLeft : (homeAvatarRect?.left ?? ((frameSize.width - 204) / 2)),
+            width: isChatOpen ? 128 : (homeAvatarRect?.width ?? 204),
+            height: isChatOpen ? 128 : (homeAvatarRect?.height ?? 204),
+          }}
+          transition={
+            shouldReduceMotion
+              ? { duration: 0.05 }
+              : {
+                  duration: isChatOpen ? 0.44 : 0.38,
+                  ease: isChatOpen ? [0.32, 0.72, 0, 1] : [0.25, 1, 0.5, 1],
+                }
+          }
+        >
+          {/* Soft lilac & warm cream halo behind character (fades out as Nova descends to drawer) */}
+          <motion.div 
+            animate={{ opacity: isChatOpen ? 0 : 0.85, scale: isChatOpen ? 0.6 : 1 }}
+            transition={{ duration: isChatOpen ? 0.25 : 0.35 }}
+            className="absolute inset-1 rounded-full bg-radial from-[#F3EEFE]/80 via-[#FDF3ED]/35 to-transparent blur-2xl pointer-events-none -z-10" 
+          />
+
+          {/* Home Nova image (smoothly crossfades out as it approaches drawer rim) */}
+          <motion.img
+            src={IP_IMAGE_URL}
+            alt="Plan B Companion Nova"
+            referrerPolicy="no-referrer"
+            animate={{ opacity: isChatOpen ? 0 : 1 }}
+            transition={{ 
+              duration: shouldReduceMotion ? 0.05 : (isChatOpen ? 0.22 : 0.26),
+              delay: shouldReduceMotion ? 0 : (isChatOpen ? 0.14 : 0)
+            }}
+            className="w-full h-full object-contain pointer-events-none drop-shadow-xs [mask-image:linear-gradient(to_bottom,black_86%,transparent_100%)] absolute inset-0"
+          />
+
+          {/* Listening Nova image (smoothly crossfades in as it arrives at drawer rim) */}
+          <motion.img
+            src={NOVA_LISTENING_URL}
+            alt="Nova listening"
+            referrerPolicy="no-referrer"
+            animate={{ opacity: isChatOpen ? 1 : 0 }}
+            transition={{ 
+              duration: shouldReduceMotion ? 0.05 : (isChatOpen ? 0.26 : 0.2),
+              delay: shouldReduceMotion ? 0 : (isChatOpen ? 0.16 : 0)
+            }}
+            className="w-full h-full object-contain pointer-events-none drop-shadow-xs absolute inset-0"
+          />
+        </motion.div>
 
         {/* 1. iOS Status Bar (44px Height Standard Safe Area) */}
         <div className="pt-3.5 pb-1 px-7 flex items-center justify-between text-xs font-semibold text-[#26263F] select-none shrink-0 z-30">
@@ -678,29 +776,19 @@ export default function App() {
         </header>
 
         {/* 3. Main Body Content: Balanced vertical layout with 24px margins */}
-        <div className="flex-1 overflow-y-auto px-6 pt-1 pb-3 flex flex-col items-center justify-center scrollbar-none z-10">
+        <div 
+          onScroll={measurePositions}
+          className="flex-1 overflow-y-auto px-6 pt-1 pb-3 flex flex-col items-center justify-center scrollbar-none z-10"
+        >
           <div className="w-full flex flex-col items-center my-auto py-1">
             
             {/* Unified Companion Section: IP + Nickname + Speech */}
             <div className="w-full flex flex-col items-center justify-center shrink-0 mb-5 sm:mb-6">
-              {/* Centered IP Character Bust (Transparent PNG) - Scaled ~1.4x (200px) */}
+              {/* Centered IP Character Bust spacer (holds geometry in document flow) */}
               <div 
-                className={`relative w-[196px] h-[196px] sm:w-[208px] sm:h-[208px] flex items-center justify-center transition-all duration-200 ease-out ${
-                  isChatOpen 
-                    ? 'opacity-0 scale-90' 
-                    : 'opacity-100 scale-100'
-                }`}
-              >
-                {/* Subtle soft lilac & warm cream halo behind character */}
-                <div className="absolute inset-1 rounded-full bg-radial from-[#F3EEFE]/80 via-[#FDF3ED]/35 to-transparent blur-2xl pointer-events-none -z-10" />
-
-                <img
-                  src={IP_IMAGE_URL}
-                  alt="Plan B Companion Nova"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain pointer-events-none drop-shadow-xs [mask-image:linear-gradient(to_bottom,black_86%,transparent_100%)]"
-                />
-              </div>
+                ref={homeAvatarRef}
+                className="relative w-[196px] h-[196px] sm:w-[208px] sm:h-[208px] flex items-center justify-center pointer-events-none shrink-0"
+              />
 
               {/* 1. Centered Nickname "Nova": 8-12px below visible Avatar */}
               <h2 className="text-[18px] font-bold text-[#26263F] tracking-tight text-center mt-2.5 select-none leading-none">
@@ -931,7 +1019,8 @@ export default function App() {
         {/* 4. Bottom Pinned Section: Conversational Input & 4 Navigation Tabs */}
         <div className="px-6 pt-2 pb-1.5 flex flex-col gap-1.5 shrink-0 z-20 bg-white/60 backdrop-blur-xl border-t border-white/65 shadow-[0_-4px_24px_rgba(90,80,140,0.04)]">
           {/* Conversational Input Entry */}
-          <div 
+          <button 
+            type="button"
             onClick={() => {
               setInputPlaceholder('Type your response…');
               setChatMessages([
@@ -943,7 +1032,8 @@ export default function App() {
               ]);
               setIsChatOpen(true);
             }}
-            className="bg-white/70 hover:bg-white/85 backdrop-blur-md rounded-full px-5 py-3 flex items-center gap-3 border border-white/80 shadow-[0_2px_12px_rgba(90,80,140,0.04)] cursor-pointer min-h-[48px] transition-all"
+            className="w-full bg-white/70 hover:bg-white/85 backdrop-blur-md rounded-full px-5 py-3 flex items-center gap-3 border border-white/80 shadow-[0_2px_12px_rgba(90,80,140,0.04)] cursor-pointer min-h-[48px] transition-all text-left"
+            aria-label="Talk to Nova"
           >
             <span className="flex-1 text-[13.5px] text-[#7A7895] font-normal select-none">
               Talk to Nova…
@@ -951,7 +1041,7 @@ export default function App() {
             <div className="text-[#6865B8]">
               <Mic className="w-5 h-5 stroke-[2]" />
             </div>
-          </div>
+          </button>
 
           {/* 4 Bottom Navigation Tabs */}
           <nav className="pt-1 px-1 flex items-center justify-between text-xs font-medium">
@@ -1073,155 +1163,181 @@ export default function App() {
           </div>
         )}
 
-        {/* 7. AI Conversation Drawer / Sheet with Nova Listening Pose */}
-        {isChatOpen && (
-          <div className="absolute inset-0 z-50 overflow-hidden flex flex-col justify-end animate-in fade-in duration-200">
-            {/* Dimmed Backdrop */}
-            <div 
-              onClick={() => setIsChatOpen(false)} 
-              className="absolute inset-0 bg-black/20 backdrop-blur-xs" 
-            />
+        {/* 7. AI Conversation Drawer / Sheet with smooth entrance and exit */}
+        <AnimatePresence>
+          {isChatOpen && (
+            <div className="absolute inset-0 z-40 overflow-hidden flex flex-col justify-end pointer-events-auto">
+              {/* Dimmed Backdrop */}
+              <motion.div 
+                onClick={() => setIsChatOpen(false)} 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={shouldReduceMotion ? { duration: 0.05 } : { duration: 0.38, ease: "easeInOut" }}
+                className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" 
+              />
 
-            {/* Drawer Sheet */}
-            <div className="relative bg-[#FAF8FD]/94 backdrop-blur-2xl rounded-t-[36px] border-t border-white/85 shadow-[0_-16px_48px_rgba(90,80,140,0.14)] flex flex-col h-[74%] max-h-[580px] z-10 animate-in slide-in-from-bottom duration-300">
-              {/* Nova in Listening Pose Peeking Over the Drawer Top Edge (Transparent PNG) */}
-              <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-32 h-32 flex items-center justify-center pointer-events-none select-none z-30">
-                <img
-                  src={NOVA_LISTENING_URL}
-                  alt="Nova listening"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain drop-shadow-xs"
-                />
-              </div>
-
-              {/* Close Button Top-Right (Independent of Nova) */}
-              <button
-                type="button"
-                onClick={() => setIsChatOpen(false)}
-                className="absolute top-3.5 right-4 z-40 w-9 h-9 rounded-full flex items-center justify-center text-[#706E8A] bg-white/60 hover:bg-white/90 border border-white/70 shadow-2xs active:scale-95 transition-all"
-                aria-label="Close"
+              {/* Drawer Sheet */}
+              <motion.div 
+                initial={shouldReduceMotion ? { y: 0, opacity: 0 } : { y: '100%' }}
+                animate={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: 0 }}
+                exit={shouldReduceMotion ? { y: 0, opacity: 0 } : { y: '100%' }}
+                transition={
+                  shouldReduceMotion
+                    ? { duration: 0.05 }
+                    : {
+                        duration: 0.42,
+                        ease: [0.32, 0.72, 0, 1],
+                      }
+                }
+                className="relative bg-[#FAF8FD]/94 backdrop-blur-2xl rounded-t-[36px] border-t border-white/85 shadow-[0_-16px_48px_rgba(90,80,140,0.14)] flex flex-col h-[74%] max-h-[580px] z-10"
               >
-                <X className="w-4 h-4 stroke-[2.2]" />
-              </button>
+                {/* Close Button Top-Right (Independent of Nova) */}
+                <button
+                  type="button"
+                  onClick={() => setIsChatOpen(false)}
+                  className="absolute top-3.5 right-4 z-40 w-9 h-9 rounded-full flex items-center justify-center text-[#706E8A] bg-white/60 hover:bg-white/90 border border-white/70 shadow-2xs active:scale-95 transition-all"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4 stroke-[2.2]" />
+                </button>
 
-              {/* Header with Centered Nickname "Nova" */}
-              <div className="pt-14 pb-2 px-5 border-b border-[#26263F]/[0.05] flex items-center justify-center shrink-0">
-                <h3 className="text-[16px] font-bold text-[#26263F] tracking-tight text-center">
-                  Nova
-                </h3>
-              </div>
+                {/* Header with Centered Nickname "Nova" */}
+                <div className="pt-14 pb-2 px-5 border-b border-[#26263F]/[0.05] flex items-center justify-center shrink-0">
+                  <h3 className="text-[16px] font-bold text-[#26263F] tracking-tight text-center">
+                    Nova
+                  </h3>
+                </div>
 
-              {/* Chat Messages Body */}
-              <div 
-                ref={chatContainerRef}
-                onScroll={handleChatScroll}
-                className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-3.5 text-xs leading-relaxed"
-              >
-                {chatMessages.map((msg) => {
-                  // If AI message has options, render as a genuine frosted chat bubble
-                  if (msg.sender === 'ai' && msg.options && msg.options.length > 0) {
-                    return (
-                      <div
-                        key={msg.id}
-                        className="flex flex-col items-start transition-opacity duration-200"
-                      >
-                        <div className="max-w-[85%] bg-white/85 backdrop-blur-md rounded-[22px] rounded-bl-xs border border-white/90 p-4 shadow-[0_2px_12px_rgba(90,80,140,0.04)] space-y-2.5">
-                          {/* Suggestion Text */}
-                          <p className="text-[13.5px] leading-relaxed text-[#26263F]">
-                            {msg.text}
-                          </p>
-
-                          {/* Action Options: If active (not disabled), show all selectable options */}
-                          {!msg.disabled && (
-                            <div className="flex flex-col items-start gap-2 pt-1">
-                              {msg.options.map((opt, optIdx) => (
-                                <button
-                                  key={optIdx}
-                                  type="button"
-                                  onClick={() => handleOptionClick(opt, msg.id)}
-                                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[18px] border border-white/90 bg-[#F4F1FD]/85 hover:bg-[#ECE7FB] active:scale-[0.98] text-[#46437B] text-xs font-semibold text-left transition-all select-none min-h-[38px] shadow-2xs cursor-pointer"
-                                >
-                                  <span>{opt.label}</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* If handled/disabled message: unselected operations are collapsed.
-                              Only the chosen option (if any) is shown as a subtle, non-clickable status chip. */}
-                          {msg.disabled && msg.selectedOptionLabel && (
-                            <div className="pt-0.5">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[14px] border border-[#5E5BAE]/20 bg-[#EBE7FA]/80 text-[11.5px] font-medium text-[#46437B] select-none cursor-default">
-                                <Check className="w-3 h-3 stroke-[2.5] text-[#5E5BAE]" />
-                                <span>{msg.selectedOptionLabel}</span>
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
+                {/* Animated Inner Content (Header, Messages, Input) */}
+                <motion.div
+                  initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0 }}
+                  transition={
+                    shouldReduceMotion
+                      ? { duration: 0.05 }
+                      : {
+                          delay: 0.16,
+                          duration: 0.26,
+                          ease: "easeOut",
+                        }
                   }
+                  className="flex-1 flex flex-col overflow-hidden"
+                >
+                  {/* Chat Messages Body */}
+                  <div 
+                    ref={chatContainerRef}
+                    onScroll={handleChatScroll}
+                    className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-3.5 text-xs leading-relaxed"
+                  >
+                    {chatMessages.map((msg) => {
+                      // If AI message has options, render as a genuine frosted chat bubble
+                      if (msg.sender === 'ai' && msg.options && msg.options.length > 0) {
+                        return (
+                          <div
+                            key={msg.id}
+                            className="flex flex-col items-start transition-opacity duration-200"
+                          >
+                            <div className="max-w-[85%] bg-white/85 backdrop-blur-md rounded-[22px] rounded-bl-xs border border-white/90 p-4 shadow-[0_2px_12px_rgba(90,80,140,0.04)] space-y-2.5">
+                              {/* Suggestion Text */}
+                              <p className="text-[13.5px] leading-relaxed text-[#26263F]">
+                                {msg.text}
+                              </p>
 
-                  // Standard chat bubble (e.g. user messages or regular AI text)
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
-                    >
-                      <div
-                        className={`max-w-[85%] px-4 py-2.5 rounded-[20px] ${
-                          msg.sender === 'user'
-                            ? 'bg-[#5E5BAE] text-white rounded-br-xs shadow-[0_3px_12px_rgba(94,91,174,0.2)] font-medium'
-                            : 'bg-white/85 backdrop-blur-md text-[#26263F] border border-white/90 rounded-bl-xs shadow-2xs'
+                              {/* Action Options: If active (not disabled), show all selectable options */}
+                              {!msg.disabled && (
+                                <div className="flex flex-col items-start gap-2 pt-1">
+                                  {msg.options.map((opt, optIdx) => (
+                                    <button
+                                      key={optIdx}
+                                      type="button"
+                                      onClick={() => handleOptionClick(opt, msg.id)}
+                                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[18px] border border-white/90 bg-[#F4F1FD]/85 hover:bg-[#ECE7FB] active:scale-[0.98] text-[#46437B] text-xs font-semibold text-left transition-all select-none min-h-[38px] shadow-2xs cursor-pointer"
+                                    >
+                                      <span>{opt.label}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* If handled/disabled message: unselected operations are collapsed.
+                                  Only the chosen option (if any) is shown as a subtle, non-clickable status chip. */}
+                              {msg.disabled && msg.selectedOptionLabel && (
+                                <div className="pt-0.5">
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[14px] border border-[#5E5BAE]/20 bg-[#EBE7FA]/80 text-[11.5px] font-medium text-[#46437B] select-none cursor-default">
+                                    <Check className="w-3 h-3 stroke-[2.5] text-[#5E5BAE]" />
+                                    <span>{msg.selectedOptionLabel}</span>
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Standard chat bubble (e.g. user messages or regular AI text)
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
+                        >
+                          <div
+                            className={`max-w-[85%] px-4 py-2.5 rounded-[20px] ${
+                              msg.sender === 'user'
+                                ? 'bg-[#5E5BAE] text-white rounded-br-xs shadow-[0_3px_12px_rgba(94,91,174,0.2)] font-medium'
+                                : 'bg-white/85 backdrop-blur-md text-[#26263F] border border-white/90 rounded-bl-xs shadow-2xs'
+                            }`}
+                          >
+                            {msg.text}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div ref={chatMessagesEndRef} />
+                  </div>
+
+                  {/* Chat Input Bar inside sheet with Home Indicator safe area */}
+                  <form
+                    onSubmit={handleSendChatMessage}
+                    className="p-4 pb-6 border-t border-[#26263F]/[0.05] bg-[#FAF8FD]/95 backdrop-blur-md shrink-0 flex flex-col gap-2"
+                  >
+                    <div className="bg-white/80 backdrop-blur-sm rounded-full px-4 py-2.5 flex items-center gap-2 border border-white/85 shadow-2xs focus-within:border-[#5E5BAE]/60 focus-within:ring-2 focus-within:ring-[#5E5BAE]/15 transition-all">
+                      <input
+                        ref={chatInputRef}
+                        type="text"
+                        value={sheetInput}
+                        onChange={(e) => setSheetInput(e.target.value)}
+                        onFocus={() => {
+                          isNearBottomRef.current = true;
+                          setTimeout(() => {
+                            chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                          }, 150);
+                        }}
+                        placeholder={inputPlaceholder}
+                        className="flex-1 bg-transparent text-xs text-[#26263F] placeholder-[#8E8EA8] outline-none"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!sheetInput.trim()}
+                        aria-label="Send message"
+                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                          sheetInput.trim()
+                            ? 'bg-[#5E5BAE] hover:bg-[#524FA0] text-white active:scale-95 shadow-2xs'
+                            : 'bg-[#EDEAF4] text-[#A2A0B8]'
                         }`}
                       >
-                        {msg.text}
-                      </div>
+                        <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+                      </button>
                     </div>
-                  );
-                })}
-                <div ref={chatMessagesEndRef} />
-              </div>
+                    <div className="w-32 h-1 bg-[#26263F]/20 rounded-full mx-auto" />
+                  </form>
+                </motion.div>
 
-              {/* Chat Input Bar inside sheet with Home Indicator safe area */}
-              <form
-                onSubmit={handleSendChatMessage}
-                className="p-4 pb-6 border-t border-[#26263F]/[0.05] bg-[#FAF8FD]/95 backdrop-blur-md shrink-0 flex flex-col gap-2"
-              >
-                <div className="bg-white/80 backdrop-blur-sm rounded-full px-4 py-2.5 flex items-center gap-2 border border-white/85 shadow-2xs focus-within:border-[#5E5BAE]/60 focus-within:ring-2 focus-within:ring-[#5E5BAE]/15 transition-all">
-                  <input
-                    ref={chatInputRef}
-                    type="text"
-                    value={sheetInput}
-                    onChange={(e) => setSheetInput(e.target.value)}
-                    onFocus={() => {
-                      isNearBottomRef.current = true;
-                      setTimeout(() => {
-                        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                      }, 150);
-                    }}
-                    placeholder={inputPlaceholder}
-                    className="flex-1 bg-transparent text-xs text-[#26263F] placeholder-[#8E8EA8] outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!sheetInput.trim()}
-                    aria-label="Send message"
-                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                      sheetInput.trim()
-                        ? 'bg-[#5E5BAE] hover:bg-[#524FA0] text-white active:scale-95 shadow-2xs'
-                        : 'bg-[#EDEAF4] text-[#A2A0B8]'
-                    }`}
-                  >
-                    <ArrowUp className="w-4 h-4 stroke-[2.5]" />
-                  </button>
-                </div>
-                <div className="w-32 h-1 bg-[#26263F]/20 rounded-full mx-auto" />
-              </form>
-
+              </motion.div>
             </div>
-          </div>
-        )}
+          )}
+        </AnimatePresence>
 
         {/* 7. Accessible Confirmation Dialog (Keyboard & Screen Reader Users) */}
         {isAccessibleConfirmOpen && (
