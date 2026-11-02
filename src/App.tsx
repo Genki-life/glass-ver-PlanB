@@ -135,6 +135,16 @@ export default function App() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef<boolean>(true);
 
+  // Media Thumbnail continuous transition refs and states
+  const cardThumbnailRef = useRef<HTMLButtonElement>(null);
+  const detailSheetRef = useRef<HTMLDivElement>(null);
+  const detailHeaderRef = useRef<HTMLDivElement>(null);
+  const detailMediaHeroRef = useRef<HTMLDivElement>(null);
+  const [detailSheetMeasuredHeight, setDetailSheetMeasuredHeight] = useState<number>(0);
+  const [detailTransitionPhase, setDetailTransitionPhase] = useState<'idle' | 'opening' | 'open' | 'closing'>('idle');
+  const [detailSourceRect, setDetailSourceRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [detailClosingStartRect, setDetailClosingStartRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
   // Layout and transition geometry refs
   const phoneFrameRef = useRef<HTMLDivElement>(null);
   const homeAvatarRef = useRef<HTMLDivElement>(null);
@@ -171,6 +181,57 @@ export default function App() {
       height: 204,
     };
   }, []);
+
+  // Measure live rect of cardThumbnail inside phoneFrame at this exact instant
+  const getLiveThumbnailRect = useCallback(() => {
+    if (cardThumbnailRef.current && phoneFrameRef.current) {
+      const fRect = phoneFrameRef.current.getBoundingClientRect();
+      const tRect = cardThumbnailRef.current.getBoundingClientRect();
+      if (fRect.width > 0 && fRect.height > 0 && tRect.width > 0 && tRect.height > 0) {
+        return {
+          top: tRect.top - fRect.top,
+          left: tRect.left - fRect.left,
+          width: tRect.width,
+          height: tRect.height,
+        };
+      }
+    }
+    const fWidth = phoneFrameRef.current?.clientWidth || 393;
+    return {
+      top: 360,
+      left: fWidth - 24 - 48,
+      width: 48,
+      height: 48,
+    };
+  }, []);
+
+  // Measure live rect of the detail media hero inside phoneFrame
+  const getLiveDetailMediaRect = useCallback(() => {
+    if (detailMediaHeroRef.current && phoneFrameRef.current) {
+      const fRect = phoneFrameRef.current.getBoundingClientRect();
+      const mRect = detailMediaHeroRef.current.getBoundingClientRect();
+      if (fRect.width > 0 && mRect.width > 0) {
+        return {
+          top: mRect.top - fRect.top,
+          left: mRect.left - fRect.left,
+          width: mRect.width,
+          height: mRect.height,
+        };
+      }
+    }
+    const fWidth = phoneFrameRef.current?.clientWidth || 393;
+    const effHeight = detailSheetMeasuredHeight > 0
+      ? detailSheetMeasuredHeight
+      : Math.min(frameSize.height * 0.75, 580);
+    const sTop = frameSize.height - effHeight;
+    const hHeight = detailHeaderRef.current?.clientHeight || 74;
+    return {
+      top: sTop + hHeight + 16,
+      left: 24,
+      width: fWidth - 48,
+      height: 144,
+    };
+  }, [detailSheetMeasuredHeight, frameSize]);
 
   // Update frame dimensions whenever phoneFrameRef resizes or viewport changes
   useEffect(() => {
@@ -209,6 +270,21 @@ export default function App() {
     return () => ro.disconnect();
   }, [isChatOpen]);
 
+  // Dynamically observe detailSheet height when open or resizing
+  useEffect(() => {
+    const sheetEl = detailSheetRef.current;
+    if (!sheetEl) return;
+    const updateSheet = () => {
+      if (sheetEl.clientHeight > 0) {
+        setDetailSheetMeasuredHeight(sheetEl.clientHeight);
+      }
+    };
+    updateSheet();
+    const ro = new ResizeObserver(() => updateSheet());
+    ro.observe(sheetEl);
+    return () => ro.disconnect();
+  }, [isDetailOpen]);
+
   // Target coordinates for Nova docked at top edge of chat sheet
   const drawerWidth = 128;
   const drawerHeight = 128;
@@ -218,6 +294,47 @@ export default function App() {
     : Math.min(frameSize.height * 0.74, 580);
   const sheetTop = frameSize.height - effectiveSheetHeight;
   const drawerTop = sheetTop - 64; // Nova peeks over the drawer edge by 64px (-top-16)
+
+  // Target coordinates for media banner in detail sheet
+  const effectiveDetailSheetHeight = detailSheetMeasuredHeight > 0
+    ? detailSheetMeasuredHeight
+    : Math.min(frameSize.height * 0.75, 580);
+  const detailSheetTop = frameSize.height - effectiveDetailSheetHeight;
+  const detailHeaderHeight = detailHeaderRef.current?.clientHeight || 74;
+  const targetMediaTop = detailSheetTop + detailHeaderHeight + 16;
+  const targetMediaLeft = 24;
+  const targetMediaWidth = Math.max(frameSize.width - 48, 200);
+  const targetMediaHeight = 144;
+
+  // Open & Close triggers for Continuous Detail Transition
+  const openDetailWithTransition = useCallback(() => {
+    const liveRect = getLiveThumbnailRect();
+    setDetailSourceRect(liveRect);
+    setDetailClosingStartRect(null);
+    setIsDetailOpen(true);
+    setDetailTransitionPhase('opening');
+  }, [getLiveThumbnailRect]);
+
+  const closeDetailWithTransition = useCallback(() => {
+    const liveThumbRect = getLiveThumbnailRect();
+    const liveMediaRect = getLiveDetailMediaRect();
+    setDetailSourceRect(liveThumbRect);
+    setDetailClosingStartRect(liveMediaRect);
+    setIsDetailOpen(false);
+    setDetailTransitionPhase('closing');
+  }, [getLiveThumbnailRect, getLiveDetailMediaRect]);
+
+  // Handle escape key to close detail modal
+  useEffect(() => {
+    if (!isDetailOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeDetailWithTransition();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDetailOpen, closeDetailWithTransition]);
 
   // Coordinated Transition Open / Close triggers
   const openChatWithTransition = useCallback((chatSetup?: () => void) => {
@@ -818,6 +935,99 @@ export default function App() {
           </motion.div>
         )}
 
+        {/* Continuous Shared-Element Media Transition Element */}
+        {detailTransitionPhase !== 'idle' && detailSourceRect && (
+          <motion.div
+            initial={
+              detailTransitionPhase === 'opening'
+                ? {
+                    top: detailSourceRect.top,
+                    left: detailSourceRect.left,
+                    width: detailSourceRect.width,
+                    height: detailSourceRect.height,
+                    borderRadius: 16,
+                  }
+                : (detailClosingStartRect
+                    ? {
+                        top: detailClosingStartRect.top,
+                        left: detailClosingStartRect.left,
+                        width: detailClosingStartRect.width,
+                        height: detailClosingStartRect.height,
+                        borderRadius: 22,
+                      }
+                    : false)
+            }
+            animate={{
+              top: isDetailOpen ? targetMediaTop : detailSourceRect.top,
+              left: isDetailOpen ? targetMediaLeft : detailSourceRect.left,
+              width: isDetailOpen ? targetMediaWidth : detailSourceRect.width,
+              height: isDetailOpen ? targetMediaHeight : detailSourceRect.height,
+              borderRadius: isDetailOpen ? 22 : 16,
+            }}
+            transition={
+              shouldReduceMotion
+                ? { duration: 0.05 }
+                : {
+                    duration: isDetailOpen ? 0.42 : 0.38,
+                    ease: isDetailOpen ? [0.32, 0.72, 0, 1] : [0.25, 1, 0.5, 1],
+                  }
+            }
+            onAnimationComplete={() => {
+              if (isDetailOpen) {
+                setDetailTransitionPhase('open');
+              } else {
+                setDetailTransitionPhase('idle');
+              }
+            }}
+            className={`absolute z-[55] overflow-hidden border border-white/80 shadow-[0_4px_20px_rgba(90,80,140,0.14)] pointer-events-none transition-opacity duration-75 ${
+              detailTransitionPhase === 'open' ? 'opacity-0' : 'opacity-100'
+            }`}
+          >
+            {/* The image */}
+            <img
+              src={currentPlan.thumbnailUrl}
+              alt={currentPlan.title}
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover absolute inset-0"
+            />
+
+            {/* Thumbnail Play Badge (Center): fades out as it expands */}
+            <motion.div
+              animate={{ opacity: isDetailOpen ? 0 : 1 }}
+              transition={{ duration: shouldReduceMotion ? 0.05 : 0.16 }}
+              className="absolute inset-0 bg-black/25 flex items-center justify-center pointer-events-none"
+            >
+              <div className="w-5 h-5 rounded-full bg-white/95 flex items-center justify-center shadow-xs">
+                <Play className="w-2.5 h-2.5 fill-[#26263F] text-[#26263F] ml-0.5" />
+              </div>
+            </motion.div>
+
+            {/* Detail Audio Banner Info (Bottom): fades in as it expands toward target */}
+            <motion.div
+              animate={{ opacity: isDetailOpen ? 1 : 0 }}
+              transition={{
+                duration: shouldReduceMotion ? 0.05 : 0.24,
+                delay: shouldReduceMotion ? 0 : (isDetailOpen ? 0.16 : 0),
+              }}
+              className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent flex items-end p-4 pointer-events-none"
+            >
+              <div className="flex items-center justify-between w-full text-white">
+                <div>
+                  <div className="text-xs font-bold leading-tight">{currentPlan.audioTitle}</div>
+                  <div className="text-[10.5px] text-white/85 mt-0.5">{currentPlan.audioSubtitle}</div>
+                </div>
+                <div className="w-9 h-9 rounded-full bg-[#5E5BAE] text-white flex items-center justify-center shadow-xs">
+                  {isPlayingAudio ? (
+                    <Volume2 className="w-4 h-4 stroke-[2.4] text-white" />
+                  ) : (
+                    <Play className="w-4 h-4 fill-white text-white ml-0.5" />
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {/* 1. iOS Status Bar (44px Height Standard Safe Area) */}
         <div className="pt-3.5 pb-1 px-7 flex items-center justify-between text-xs font-semibold text-[#26263F] select-none shrink-0 z-30">
           <span>9:41</span>
@@ -986,20 +1196,28 @@ export default function App() {
 
                       {/* Rich Media Thumbnail Entry */}
                       <button
+                        ref={cardThumbnailRef}
                         type="button"
-                        onClick={() => setIsDetailOpen(true)}
-                        className="relative w-12 h-12 rounded-[16px] overflow-hidden shrink-0 border border-white/80 shadow-[0_2px_8px_rgba(38,38,63,0.06)] group active:scale-95 transition-all"
+                        onClick={openDetailWithTransition}
+                        className="relative w-12 h-12 rounded-[16px] overflow-hidden shrink-0 border border-white/80 shadow-[0_2px_8px_rgba(38,38,63,0.06)] group active:scale-95 transition-all cursor-pointer"
                         title="View plan guide"
+                        aria-label="View plan guide"
                       >
-                        <img
-                          src={currentPlan.thumbnailUrl}
-                          alt="Plan preview"
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                          <div className="w-5 h-5 rounded-full bg-white/95 flex items-center justify-center shadow-xs">
-                            <Play className="w-2.5 h-2.5 fill-[#26263F] text-[#26263F] ml-0.5" />
+                        <div
+                          className={`w-full h-full relative transition-opacity duration-150 ${
+                            detailTransitionPhase !== 'idle' || isDetailOpen ? 'opacity-0' : 'opacity-100'
+                          }`}
+                        >
+                          <img
+                            src={currentPlan.thumbnailUrl}
+                            alt="Plan preview"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                            <div className="w-5 h-5 rounded-full bg-white/95 flex items-center justify-center shadow-xs">
+                              <Play className="w-2.5 h-2.5 fill-[#26263F] text-[#26263F] ml-0.5" />
+                            </div>
                           </div>
                         </div>
                       </button>
@@ -1176,91 +1394,143 @@ export default function App() {
           </div>
         </div>
 
-        {/* 6. Rich Media Plan Detail Sheet */}
-        {isDetailOpen && (
-          <div className="absolute inset-0 z-50 bg-black/20 backdrop-blur-xs flex flex-col justify-end animate-in fade-in duration-200">
-            <div className="bg-[#FAF8FD]/92 backdrop-blur-2xl rounded-t-[34px] border-t border-white/80 shadow-[0_-16px_48px_rgba(90,80,140,0.12)] flex flex-col h-[75%] max-h-[580px] animate-in slide-in-from-bottom duration-300">
-              
-              {/* Sheet Header */}
-              <div className="px-6 pt-5 pb-3.5 border-b border-[#26263F]/[0.06] flex items-center justify-between shrink-0">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#6865B8]">
-                    Plan Details
-                  </span>
-                  <h3 className="text-base font-bold text-[#26263F] mt-0.5">{currentPlan.detailTitle}</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsDetailOpen(false)}
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-[#706E8A] bg-white/60 hover:bg-white/90 border border-white/70 shadow-2xs active:scale-95 transition-all"
-                  aria-label="Close"
-                >
-                  <X className="w-4 h-4 stroke-[2.2]" />
-                </button>
-              </div>
+        {/* 6. Rich Media Plan Detail Sheet with Smooth Entrance & Exit */}
+        <AnimatePresence>
+          {isDetailOpen && (
+            <div className="absolute inset-0 z-50 overflow-hidden flex flex-col justify-end pointer-events-auto">
+              {/* Dimmed Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={shouldReduceMotion ? { duration: 0.05 } : { duration: 0.36, ease: "easeInOut" }}
+                onClick={closeDetailWithTransition}
+                className="absolute inset-0 bg-black/20 backdrop-blur-xs"
+              />
 
-              {/* Sheet Content: Media & Action Guide */}
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-                {/* Media Hero Banner */}
-                <div className="relative w-full h-36 rounded-[22px] overflow-hidden border border-white/80 shadow-xs">
-                  <img
-                    src={currentPlan.thumbnailUrl}
-                    alt={currentPlan.title}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent flex items-end p-4">
-                    <div className="flex items-center justify-between w-full text-white">
-                      <div>
-                        <div className="text-xs font-bold">{currentPlan.audioTitle}</div>
-                        <div className="text-[10.5px] text-white/85">{currentPlan.audioSubtitle}</div>
+              {/* Sheet Container */}
+              <motion.div
+                ref={detailSheetRef}
+                initial={shouldReduceMotion ? { y: 0, opacity: 0 } : { y: '100%' }}
+                animate={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: 0 }}
+                exit={shouldReduceMotion ? { y: 0, opacity: 0 } : { y: '100%' }}
+                transition={
+                  shouldReduceMotion
+                    ? { duration: 0.05 }
+                    : {
+                        duration: 0.42,
+                        ease: [0.32, 0.72, 0, 1],
+                      }
+                }
+                className="relative bg-[#FAF8FD]/94 backdrop-blur-2xl rounded-t-[34px] border-t border-white/80 shadow-[0_-16px_48px_rgba(90,80,140,0.12)] flex flex-col h-[75%] max-h-[580px] z-10"
+              >
+                {/* Sheet Header */}
+                <div 
+                  ref={detailHeaderRef}
+                  className="px-6 pt-5 pb-3.5 border-b border-[#26263F]/[0.06] flex items-center justify-between shrink-0"
+                >
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#6865B8]">
+                      Plan Details
+                    </span>
+                    <h3 className="text-base font-bold text-[#26263F] mt-0.5">{currentPlan.detailTitle}</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeDetailWithTransition}
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-[#706E8A] bg-white/60 hover:bg-white/90 border border-white/70 shadow-2xs active:scale-95 transition-all cursor-pointer"
+                    aria-label="Close"
+                  >
+                    <X className="w-4 h-4 stroke-[2.2]" />
+                  </button>
+                </div>
+
+                {/* Sheet Content: Media & Action Guide */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+                  {/* Media Hero Banner: In-place slot */}
+                  <div
+                    ref={detailMediaHeroRef}
+                    className="relative w-full h-36 rounded-[22px] overflow-hidden border border-white/80 shadow-xs shrink-0"
+                  >
+                    <div
+                      className={`w-full h-full relative transition-opacity duration-150 ${
+                        detailTransitionPhase === 'open' ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+                      }`}
+                    >
+                      <img
+                        src={currentPlan.thumbnailUrl}
+                        alt={currentPlan.title}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent flex items-end p-4">
+                        <div className="flex items-center justify-between w-full text-white">
+                          <div>
+                            <div className="text-xs font-bold leading-tight">{currentPlan.audioTitle}</div>
+                            <div className="text-[10.5px] text-white/85 mt-0.5">{currentPlan.audioSubtitle}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsPlayingAudio(!isPlayingAudio)}
+                            className="w-9 h-9 rounded-full bg-[#5E5BAE] hover:bg-[#524FA0] text-white flex items-center justify-center shadow-xs active:scale-95 transition-transform cursor-pointer"
+                            aria-label={isPlayingAudio ? "Pause audio guide" : "Play audio guide"}
+                          >
+                            {isPlayingAudio ? (
+                              <Volume2 className="w-4 h-4 stroke-[2.4] text-white" />
+                            ) : (
+                              <Play className="w-4 h-4 fill-white text-white ml-0.5" />
+                            )}
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsPlayingAudio(!isPlayingAudio)}
-                        className="w-9 h-9 rounded-full bg-[#5E5BAE] hover:bg-[#524FA0] text-white flex items-center justify-center shadow-xs active:scale-95 transition-transform"
-                      >
-                        {isPlayingAudio ? (
-                          <Volume2 className="w-4 h-4 stroke-[2.4] text-white" />
-                        ) : (
-                          <Play className="w-4 h-4 fill-white text-white ml-0.5" />
-                        )}
-                      </button>
                     </div>
                   </div>
+
+                  {/* Clean Practical Tips: Fades in gracefully with slight delay */}
+                  <motion.div
+                    initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      shouldReduceMotion
+                        ? { duration: 0.05 }
+                        : {
+                            delay: 0.16,
+                            duration: 0.26,
+                            ease: "easeOut",
+                          }
+                    }
+                    className="space-y-2.5"
+                  >
+                    <h4 className="text-xs font-bold text-[#26263F]">Gentle Guidelines</h4>
+                    <div className="p-3.5 rounded-[20px] bg-white/75 backdrop-blur-md border border-white/80 text-xs text-[#5D5B78] space-y-2.5 shadow-2xs">
+                      <div className="flex items-start gap-2.5">
+                        <Clock className="w-4 h-4 text-[#6865B8] mt-0.5 shrink-0 stroke-[2]" />
+                        <span>{currentPlan.tip1}</span>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <Sparkles className="w-4 h-4 text-[#FF7A32] mt-0.5 shrink-0 stroke-[2]" />
+                        <span>{currentPlan.tip2}</span>
+                      </div>
+                    </div>
+                  </motion.div>
                 </div>
 
-                {/* Clean Practical Tips */}
-                <div className="space-y-2.5">
-                  <h4 className="text-xs font-bold text-[#26263F]">Gentle Guidelines</h4>
-                  <div className="p-3.5 rounded-[20px] bg-white/75 backdrop-blur-md border border-white/80 text-xs text-[#5D5B78] space-y-2.5 shadow-2xs">
-                    <div className="flex items-start gap-2.5">
-                      <Clock className="w-4 h-4 text-[#6865B8] mt-0.5 shrink-0 stroke-[2]" />
-                      <span>{currentPlan.tip1}</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <Sparkles className="w-4 h-4 text-[#FF7A32] mt-0.5 shrink-0 stroke-[2]" />
-                      <span>{currentPlan.tip2}</span>
-                    </div>
-                  </div>
+                {/* Sheet Bottom Safe Area & Action */}
+                <div className="p-5 pb-6 border-t border-[#26263F]/[0.06] bg-[#FAF8FD]/90 backdrop-blur-md flex flex-col gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={closeDetailWithTransition}
+                    className="w-full py-3 rounded-[18px] bg-white/75 hover:bg-white/90 border border-white/90 text-[#46437B] text-xs font-semibold text-center active:scale-98 transition-all min-h-[44px] shadow-2xs backdrop-blur-md cursor-pointer"
+                  >
+                    Back to Today
+                  </button>
+                  <div className="w-32 h-1 bg-[#26263F]/20 rounded-full mx-auto" />
                 </div>
-              </div>
 
-              {/* Sheet Bottom Safe Area & Action */}
-              <div className="p-5 pb-6 border-t border-[#26263F]/[0.06] bg-[#FAF8FD]/90 backdrop-blur-md flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsDetailOpen(false)}
-                  className="w-full py-3 rounded-[18px] bg-white/75 hover:bg-white/90 border border-white/90 text-[#46437B] text-xs font-semibold text-center active:scale-98 transition-all min-h-[44px] shadow-2xs backdrop-blur-md"
-                >
-                  Back to Today
-                </button>
-                <div className="w-32 h-1 bg-[#26263F]/20 rounded-full mx-auto" />
-              </div>
-
+              </motion.div>
             </div>
-          </div>
-        )}
+          )}
+        </AnimatePresence>
 
         {/* 7. AI Conversation Drawer / Sheet with smooth entrance and exit */}
         <AnimatePresence>
