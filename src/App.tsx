@@ -140,7 +140,9 @@ export default function App() {
   const detailSheetRef = useRef<HTMLDivElement>(null);
   const detailHeaderRef = useRef<HTMLDivElement>(null);
   const detailMediaHeroRef = useRef<HTMLDivElement>(null);
+  const floatingMediaRef = useRef<HTMLDivElement>(null);
   const [detailSheetMeasuredHeight, setDetailSheetMeasuredHeight] = useState<number>(0);
+  const [detailHeaderHeight, setDetailHeaderHeight] = useState<number>(74);
   const [detailTransitionPhase, setDetailTransitionPhase] = useState<'idle' | 'opening' | 'open' | 'closing'>('idle');
   const [detailSourceRect, setDetailSourceRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [detailClosingStartRect, setDetailClosingStartRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -149,6 +151,9 @@ export default function App() {
   const phoneFrameRef = useRef<HTMLDivElement>(null);
   const homeAvatarRef = useRef<HTMLDivElement>(null);
   const chatSheetRef = useRef<HTMLDivElement>(null);
+  const planCardRef = useRef<HTMLDivElement>(null);
+  const cardContentRef = useRef<HTMLDivElement>(null);
+  const [cardContentHeight, setCardContentHeight] = useState<number | null>(null);
   const shouldReduceMotion = useReducedMotion();
 
   const [frameSize, setFrameSize] = useState<{ width: number; height: number }>({ width: 393, height: 844 });
@@ -210,7 +215,7 @@ export default function App() {
     if (detailMediaHeroRef.current && phoneFrameRef.current) {
       const fRect = phoneFrameRef.current.getBoundingClientRect();
       const mRect = detailMediaHeroRef.current.getBoundingClientRect();
-      if (fRect.width > 0 && mRect.width > 0) {
+      if (fRect.width > 0 && mRect.width > 0 && mRect.height > 0) {
         return {
           top: mRect.top - fRect.top,
           left: mRect.left - fRect.left,
@@ -224,14 +229,13 @@ export default function App() {
       ? detailSheetMeasuredHeight
       : Math.min(frameSize.height * 0.75, 580);
     const sTop = frameSize.height - effHeight;
-    const hHeight = detailHeaderRef.current?.clientHeight || 74;
     return {
-      top: sTop + hHeight + 16,
+      top: sTop + detailHeaderHeight + 16,
       left: 24,
-      width: fWidth - 48,
+      width: Math.max(fWidth - 48, 200),
       height: 144,
     };
-  }, [detailSheetMeasuredHeight, frameSize]);
+  }, [detailSheetMeasuredHeight, detailHeaderHeight, frameSize]);
 
   // Update frame dimensions whenever phoneFrameRef resizes or viewport changes
   useEffect(() => {
@@ -285,6 +289,36 @@ export default function App() {
     return () => ro.disconnect();
   }, [isDetailOpen]);
 
+  // Dynamically observe detailHeader height to accommodate long titles
+  useEffect(() => {
+    const headerEl = detailHeaderRef.current;
+    if (!headerEl) return;
+    const updateHeader = () => {
+      if (headerEl.clientHeight > 0) {
+        setDetailHeaderHeight(headerEl.clientHeight);
+      }
+    };
+    updateHeader();
+    const ro = new ResizeObserver(() => updateHeader());
+    ro.observe(headerEl);
+    return () => ro.disconnect();
+  }, [isDetailOpen]);
+
+  // Dynamically observe planCard content height to animate height smoothly downward
+  useEffect(() => {
+    const el = cardContentRef.current;
+    if (!el) return;
+    const updateHeight = () => {
+      if (el.offsetHeight > 0) {
+        setCardContentHeight(el.offsetHeight);
+      }
+    };
+    updateHeight();
+    const ro = new ResizeObserver(() => updateHeight());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [planState, currentPlan]);
+
   // Target coordinates for Nova docked at top edge of chat sheet
   const drawerWidth = 128;
   const drawerHeight = 128;
@@ -300,7 +334,6 @@ export default function App() {
     ? detailSheetMeasuredHeight
     : Math.min(frameSize.height * 0.75, 580);
   const detailSheetTop = frameSize.height - effectiveDetailSheetHeight;
-  const detailHeaderHeight = detailHeaderRef.current?.clientHeight || 74;
   const targetMediaTop = detailSheetTop + detailHeaderHeight + 16;
   const targetMediaLeft = 24;
   const targetMediaWidth = Math.max(frameSize.width - 48, 200);
@@ -308,21 +341,49 @@ export default function App() {
 
   // Open & Close triggers for Continuous Detail Transition
   const openDetailWithTransition = useCallback(() => {
-    const liveRect = getLiveThumbnailRect();
-    setDetailSourceRect(liveRect);
+    // If mid-flight during closing, measure current floating position or thumbnail
+    let startRect = getLiveThumbnailRect();
+    if (floatingMediaRef.current && detailTransitionPhase === 'closing' && phoneFrameRef.current) {
+      const fRect = phoneFrameRef.current.getBoundingClientRect();
+      const mRect = floatingMediaRef.current.getBoundingClientRect();
+      if (mRect.width > 0 && mRect.height > 0) {
+        startRect = {
+          top: mRect.top - fRect.top,
+          left: mRect.left - fRect.left,
+          width: mRect.width,
+          height: mRect.height,
+        };
+      }
+    }
+    setDetailSourceRect(startRect);
     setDetailClosingStartRect(null);
     setIsDetailOpen(true);
     setDetailTransitionPhase('opening');
-  }, [getLiveThumbnailRect]);
+  }, [getLiveThumbnailRect, detailTransitionPhase]);
 
   const closeDetailWithTransition = useCallback(() => {
     const liveThumbRect = getLiveThumbnailRect();
-    const liveMediaRect = getLiveDetailMediaRect();
+    let liveMediaRect = getLiveDetailMediaRect();
+
+    // If mid-flight during opening, capture live mid-flight position
+    if (floatingMediaRef.current && detailTransitionPhase === 'opening' && phoneFrameRef.current) {
+      const fRect = phoneFrameRef.current.getBoundingClientRect();
+      const mRect = floatingMediaRef.current.getBoundingClientRect();
+      if (mRect.width > 0 && mRect.height > 0) {
+        liveMediaRect = {
+          top: mRect.top - fRect.top,
+          left: mRect.left - fRect.left,
+          width: mRect.width,
+          height: mRect.height,
+        };
+      }
+    }
+
     setDetailSourceRect(liveThumbRect);
     setDetailClosingStartRect(liveMediaRect);
     setIsDetailOpen(false);
     setDetailTransitionPhase('closing');
-  }, [getLiveThumbnailRect, getLiveDetailMediaRect]);
+  }, [getLiveThumbnailRect, getLiveDetailMediaRect, detailTransitionPhase]);
 
   // Handle escape key to close detail modal
   useEffect(() => {
@@ -938,6 +999,8 @@ export default function App() {
         {/* Continuous Shared-Element Media Transition Element */}
         {detailTransitionPhase !== 'idle' && detailSourceRect && (
           <motion.div
+            key={detailTransitionPhase === 'closing' ? 'closing' : 'opening'}
+            ref={floatingMediaRef}
             initial={
               detailTransitionPhase === 'opening'
                 ? {
@@ -955,7 +1018,13 @@ export default function App() {
                         height: detailClosingStartRect.height,
                         borderRadius: 22,
                       }
-                    : false)
+                    : {
+                        top: targetMediaTop,
+                        left: targetMediaLeft,
+                        width: targetMediaWidth,
+                        height: targetMediaHeight,
+                        borderRadius: 22,
+                      })
             }
             animate={{
               top: isDetailOpen ? targetMediaTop : detailSourceRect.top,
@@ -968,7 +1037,7 @@ export default function App() {
               shouldReduceMotion
                 ? { duration: 0.05 }
                 : {
-                    duration: isDetailOpen ? 0.42 : 0.38,
+                    duration: isDetailOpen ? 0.40 : 0.36,
                     ease: isDetailOpen ? [0.32, 0.72, 0, 1] : [0.25, 1, 0.5, 1],
                   }
             }
@@ -1068,9 +1137,9 @@ export default function App() {
 
         {/* 3. Main Body Content: Balanced vertical layout with 24px margins */}
         <div 
-          className="flex-1 overflow-y-auto px-6 pt-1 pb-3 flex flex-col items-center justify-center scrollbar-none z-10"
+          className="flex-1 overflow-y-auto px-6 pt-2 pb-5 flex flex-col items-center justify-start scrollbar-none z-10 overscroll-contain"
         >
-          <div className="w-full flex flex-col items-center my-auto py-1">
+          <div className="w-full flex flex-col items-center py-1">
             
             {/* Unified Companion Section: IP + Nickname + Speech */}
             <div className="w-full flex flex-col items-center justify-center shrink-0 mb-5 sm:mb-6">
@@ -1128,8 +1197,17 @@ export default function App() {
             </div>
 
             {/* 3. Plan Card: 28px corner radius with delicate frosted glass texture */}
-            <div 
-              className={`w-full rounded-[28px] p-6 transition-all duration-300 ease-out shrink-0 relative overflow-hidden backdrop-blur-xl ${
+            <motion.div 
+              ref={planCardRef}
+              animate={{
+                height: cardContentHeight !== null ? cardContentHeight : 'auto'
+              }}
+              transition={
+                shouldReduceMotion
+                  ? { duration: 0.05 }
+                  : { duration: 0.40, ease: [0.32, 0.72, 0, 1] }
+              }
+              className={`w-full rounded-[28px] shrink-0 relative overflow-hidden backdrop-blur-xl transition-[background-color,border-color,box-shadow] duration-300 ${
                 planState === 'suggested'
                   ? 'bg-white/75 border border-white/85 shadow-[0_8px_32px_-8px_rgba(110,100,165,0.08),0_1px_1px_rgba(255,255,255,0.95)_inset]'
                   : 'bg-white/80 border border-white/90 shadow-[0_10px_36px_-8px_rgba(94,91,174,0.10),0_1px_1px_rgba(255,255,255,0.95)_inset]'
@@ -1138,196 +1216,253 @@ export default function App() {
               {/* Subtle top edge frosted light reflection inside the card */}
               <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white to-transparent pointer-events-none" />
 
-              {/* CARD STATE 1: SUGGESTED (Initial Single AI Recommendation) */}
-              {planState === 'suggested' && (
-                <div className="flex flex-col justify-between gap-4 animate-in fade-in duration-200">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#6865B8] block">
+              {/* Inner Measurable Content Container */}
+              <div ref={cardContentRef} className="p-6 w-full flex flex-col">
+                
+                {/* 1. Header Area: Crossfading Label + Continuous Title + Thumbnail */}
+                <div className="w-full">
+                  {/* Crossfading Section Label: Same baseline */}
+                  <div className="relative h-4 mb-1 select-none">
+                    <span 
+                      className={`text-[11px] font-bold uppercase tracking-wider text-[#6865B8] absolute inset-0 transition-opacity ${
+                        shouldReduceMotion ? 'duration-75' : 'duration-200'
+                      } ${
+                        planState === 'suggested' ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      }`}
+                    >
                       Today’s suggestion
                     </span>
-                    <h2 className="text-[20px] sm:text-[21px] font-bold tracking-tight text-[#26263F] mt-1.5 leading-snug">
-                      {currentPlan.title}
-                    </h2>
-                    <p className="text-[14px] text-[#5D5B78] mt-1.5 leading-relaxed">
-                      {currentPlan.subtitle}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={handleSoundsGood}
-                      className="h-12 px-4 rounded-[18px] bg-[#5E5BAE] hover:bg-[#524FA0] active:bg-[#484591] active:scale-[0.98] text-white text-[14px] font-bold shadow-[0_4px_16px_rgba(94,91,174,0.22)] border border-white/20 transition-all flex items-center justify-center text-center min-h-[44px]"
+                    <span 
+                      className={`text-[11px] font-bold uppercase tracking-wider text-[#6865B8] absolute inset-0 transition-opacity ${
+                        shouldReduceMotion ? 'duration-75' : 'duration-250 delay-100'
+                      } ${
+                        planState !== 'suggested' ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      }`}
                     >
-                      Sounds good
-                    </button>
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        onClick={handleInitialPlanB}
-                        className="h-12 w-full px-4 rounded-[18px] bg-white/70 hover:bg-white/90 active:scale-[0.98] text-[#46437B] border border-white/90 shadow-[0_2px_10px_rgba(94,91,174,0.05)] text-[14px] font-semibold transition-all flex items-center justify-center text-center min-h-[44px] backdrop-blur-md"
-                      >
-                        Plan B
-                      </button>
-                      {/* Light explanatory hint for first-time users */}
-                      {showPlanBHint && (
-                        <span className="text-[11px] text-[#706E8A] text-center mt-1.5 select-none animate-in fade-in font-normal tracking-tight">
-                          Find another way
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* CARD STATE 2 & 3: ACCEPTED (YOUR PLAN) & COMPLETED */}
-              {planState !== 'suggested' && (
-                <div className="flex flex-col gap-4 animate-in fade-in duration-300">
-                  
-                  {/* 1. Top Section: Label "YOUR PLAN", Plan Title Left, Thumbnail Right */}
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#6865B8] block mb-1">
                       YOUR PLAN
                     </span>
-                    <div className="flex items-center justify-between gap-3">
-                      <h2 className="text-[20px] sm:text-[21px] font-bold tracking-tight text-[#26263F] leading-snug truncate">
-                        {currentPlan.title}
-                      </h2>
+                  </div>
 
-                      {/* Rich Media Thumbnail Entry */}
-                      <button
-                        ref={cardThumbnailRef}
-                        type="button"
-                        onClick={openDetailWithTransition}
-                        className="relative w-12 h-12 rounded-[16px] overflow-hidden shrink-0 border border-white/80 shadow-[0_2px_8px_rgba(38,38,63,0.06)] group active:scale-95 transition-all cursor-pointer"
-                        title="View plan guide"
-                        aria-label="View plan guide"
-                      >
-                        <div
-                          className={`w-full h-full relative transition-opacity duration-150 ${
-                            detailTransitionPhase !== 'idle' || isDetailOpen ? 'opacity-0' : 'opacity-100'
-                          }`}
+                  {/* Title & Thumbnail Row */}
+                  <div className="flex items-center justify-between gap-3">
+                    {/* Continuous Plan Title: Always in DOM, never jumps */}
+                    <h2 className="text-[20px] sm:text-[21px] font-bold tracking-tight text-[#26263F] leading-snug flex-1">
+                      {currentPlan.title}
+                    </h2>
+
+                    {/* Rich Media Thumbnail Entry (Only in Accepted State, fades in softly) */}
+                    <div 
+                      className={`transition-all duration-300 ${
+                        planState !== 'suggested'
+                          ? 'opacity-100 scale-100 pointer-events-auto'
+                          : 'opacity-0 scale-90 pointer-events-none w-0 h-0 overflow-hidden'
+                      }`}
+                    >
+                      {planState !== 'suggested' && (
+                        <button
+                          ref={cardThumbnailRef}
+                          type="button"
+                          onClick={openDetailWithTransition}
+                          className="relative w-12 h-12 rounded-[16px] overflow-hidden shrink-0 border border-white/80 shadow-[0_2px_8px_rgba(38,38,63,0.06)] group active:scale-95 transition-all cursor-pointer"
+                          title="View plan guide"
+                          aria-label="View plan guide"
                         >
-                          <img
-                            src={currentPlan.thumbnailUrl}
-                            alt="Plan preview"
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          />
-                          <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                            <div className="w-5 h-5 rounded-full bg-white/95 flex items-center justify-center shadow-xs">
-                              <Play className="w-2.5 h-2.5 fill-[#26263F] text-[#26263F] ml-0.5" />
+                          <div
+                            className={`w-full h-full relative transition-opacity duration-150 ${
+                              detailTransitionPhase !== 'idle' || isDetailOpen ? 'opacity-0' : 'opacity-100'
+                            }`}
+                          >
+                            <img
+                              src={currentPlan.thumbnailUrl}
+                              alt="Plan preview"
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                              <div className="w-5 h-5 rounded-full bg-white/95 flex items-center justify-center shadow-xs">
+                                <Play className="w-2.5 h-2.5 fill-[#26263F] text-[#26263F] ml-0.5" />
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 2. Middle Section: Horizontally Centered Circular Done Button (1.4x) + "Hold to complete" */}
-                  <div className="flex flex-col items-center justify-center py-1">
-                    <div className="relative w-[76px] h-[76px] flex items-center justify-center">
-                      {/* SVG Progress Ring */}
-                      <svg className="w-[76px] h-[76px] -rotate-90 pointer-events-none" viewBox="0 0 76 76">
-                        <circle
-                          cx="38"
-                          cy="38"
-                          r={circleRadius}
-                          className="stroke-[#EAE7F6]/80"
-                          strokeWidth="4"
-                          fill="transparent"
-                        />
-                        <circle
-                          cx="38"
-                          cy="38"
-                          r={circleRadius}
-                          className={`stroke-[#FF7A32] ${isHolding ? 'transition-none' : 'transition-all duration-150'}`}
-                          strokeWidth="4.5"
-                          strokeDasharray={circumference}
-                          strokeDashoffset={planState === 'completed' ? 0 : strokeDashoffset}
-                          strokeLinecap="round"
-                          fill="transparent"
-                        />
-                      </svg>
-
-                      {/* Circular Button Core (60px diameter, min 44px target) */}
-                      <button
-                        type="button"
-                        onMouseDown={startHold}
-                        onMouseUp={cancelHold}
-                        onMouseLeave={cancelHold}
-                        onTouchStart={startHold}
-                        onTouchEnd={cancelHold}
-                        onTouchCancel={cancelHold}
-                        onTouchMove={handleTouchMove}
-                        onContextMenu={(e) => e.preventDefault()}
-                        onKeyDown={handleDoneKeyDown}
-                        onClick={handleDoneClick}
-                        aria-label={planState === 'completed' ? 'Plan completed' : 'Press and hold for 3 seconds to complete, or press Enter for confirmation dialog'}
-                        className={`absolute w-[60px] h-[60px] rounded-full flex items-center justify-center font-bold transition-all duration-200 select-none shadow-sm touch-none border border-white/20 ${
-                          planState === 'completed'
-                            ? 'bg-[#54519E] text-white shadow-[0_4px_16px_rgba(84,81,158,0.25)]'
-                            : isHolding
-                            ? 'bg-[#484591] text-white scale-95 shadow-inner'
-                            : 'bg-[#5E5BAE] hover:bg-[#524FA0] active:bg-[#484591] text-white shadow-[0_4px_18px_rgba(94,91,174,0.28)]'
-                        }`}
-                      >
-                        {planState === 'completed' ? (
-                          <Check className="w-6 h-6 stroke-[3] text-white" />
-                        ) : (
-                          <span className="font-bold text-[16px] tracking-tight text-white">Done</span>
-                        )}
-                      </button>
-                    </div>
-
-                    <span className="text-[12px] mt-2 whitespace-nowrap text-center font-normal">
-                      {planState === 'completed' ? (
-                        <span className="text-[#5E5BAE] font-semibold">Completed</span>
-                      ) : (
-                        <span className="text-[#706E8A]">Hold to complete</span>
+                        </button>
                       )}
-                    </span>
+                    </div>
                   </div>
-
-                  {/* 3. Bottom Section: Side-by-Side "Plan B" and "Not today" */}
-                  <div className="flex items-center justify-center gap-7 pt-2.5 border-t border-[#26263F]/[0.06]">
-                    {planState === 'completed' ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          hasCompletedRef.current = false;
-                          isHoldingRef.current = false;
-                          setPlanState('accepted');
-                          setHoldProgress(0);
-                        }}
-                        className="text-xs font-semibold text-[#46437B] hover:text-[#26263F] py-2 px-3 transition-colors whitespace-nowrap underline underline-offset-3 cursor-pointer min-h-[44px] flex items-center"
-                      >
-                        Undo completion
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={handleAcceptedPlanB}
-                          className="text-xs font-semibold text-[#46437B] hover:text-[#26263F] py-2 px-3 rounded-full hover:bg-white/50 transition-colors whitespace-nowrap cursor-pointer active:scale-95 min-h-[44px] flex items-center"
-                        >
-                          Plan B
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleNotToday}
-                          className="text-xs font-semibold text-[#46437B] hover:text-[#26263F] py-2 px-3 rounded-full hover:bg-white/50 transition-colors whitespace-nowrap cursor-pointer active:scale-95 min-h-[44px] flex items-center"
-                        >
-                          Not today
-                        </button>
-                      </>
-                    )}
-                  </div>
-
                 </div>
-              )}
 
-            </div>
+                {/* 2. SUGGESTED EXTRA: Subtitle + Initial Action Buttons (Fades out when accepting) */}
+                <AnimatePresence initial={false}>
+                  {planState === 'suggested' && (
+                    <motion.div
+                      key="suggested-extra"
+                      initial={{ opacity: 1, height: 'auto' }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={
+                        shouldReduceMotion
+                          ? { opacity: 0, height: 0 }
+                          : {
+                              opacity: 0,
+                              height: 0,
+                              transition: {
+                                opacity: { duration: 0.18, ease: "easeOut" },
+                                height: { duration: 0.36, ease: [0.32, 0.72, 0, 1] }
+                              }
+                            }
+                      }
+                      className="overflow-hidden flex flex-col gap-4 pt-1.5"
+                    >
+                      <p className="text-[14px] text-[#5D5B78] leading-relaxed">
+                        {currentPlan.subtitle}
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-3 pt-2 pb-0.5">
+                        <button
+                          type="button"
+                          onClick={handleSoundsGood}
+                          className="h-12 px-4 rounded-[18px] bg-[#5E5BAE] hover:bg-[#524FA0] active:bg-[#484591] active:scale-[0.98] text-white text-[14px] font-bold shadow-[0_4px_16px_rgba(94,91,174,0.22)] border border-white/20 transition-all flex items-center justify-center text-center min-h-[44px] cursor-pointer"
+                        >
+                          Sounds good
+                        </button>
+                        <div className="flex flex-col">
+                          <button
+                            type="button"
+                            onClick={handleInitialPlanB}
+                            className="h-12 w-full px-4 rounded-[18px] bg-white/70 hover:bg-white/90 active:scale-[0.98] text-[#46437B] border border-white/90 shadow-[0_2px_10px_rgba(94,91,174,0.05)] text-[14px] font-semibold transition-all flex items-center justify-center text-center min-h-[44px] backdrop-blur-md cursor-pointer"
+                          >
+                            Plan B
+                          </button>
+                          {showPlanBHint && (
+                            <span className="text-[11px] text-[#706E8A] text-center mt-1.5 select-none animate-in fade-in font-normal tracking-tight">
+                              Find another way
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* 3. ACCEPTED EXTRA: Circular Done Button + Auxiliary Operations (Fades in softly when expanding) */}
+                <AnimatePresence initial={false}>
+                  {planState !== 'suggested' && (
+                    <motion.div
+                      key="accepted-extra"
+                      initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                      transition={{
+                        duration: shouldReduceMotion ? 0.05 : 0.32,
+                        delay: shouldReduceMotion ? 0 : 0.12,
+                        ease: [0.32, 0.72, 0, 1]
+                      }}
+                      className="flex flex-col gap-4 pt-3"
+                    >
+                      {/* Horizontally Centered Circular Done Button + "Hold to complete" */}
+                      <div className="flex flex-col items-center justify-center py-1">
+                        <div className="relative w-[76px] h-[76px] flex items-center justify-center">
+                          {/* SVG Progress Ring */}
+                          <svg className="w-[76px] h-[76px] -rotate-90 pointer-events-none" viewBox="0 0 76 76">
+                            <circle
+                              cx="38"
+                              cy="38"
+                              r={circleRadius}
+                              className="stroke-[#EAE7F6]/80"
+                              strokeWidth="4"
+                              fill="transparent"
+                            />
+                            <circle
+                              cx="38"
+                              cy="38"
+                              r={circleRadius}
+                              className={`stroke-[#FF7A32] ${isHolding ? 'transition-none' : 'transition-all duration-150'}`}
+                              strokeWidth="4.5"
+                              strokeDasharray={circumference}
+                              strokeDashoffset={planState === 'completed' ? 0 : strokeDashoffset}
+                              strokeLinecap="round"
+                              fill="transparent"
+                            />
+                          </svg>
+
+                          {/* Circular Button Core (60px diameter, min 44px target) */}
+                          <button
+                            type="button"
+                            onMouseDown={startHold}
+                            onMouseUp={cancelHold}
+                            onMouseLeave={cancelHold}
+                            onTouchStart={startHold}
+                            onTouchEnd={cancelHold}
+                            onTouchCancel={cancelHold}
+                            onTouchMove={handleTouchMove}
+                            onContextMenu={(e) => e.preventDefault()}
+                            onKeyDown={handleDoneKeyDown}
+                            onClick={handleDoneClick}
+                            aria-label={planState === 'completed' ? 'Plan completed' : 'Press and hold for 3 seconds to complete, or press Enter for confirmation dialog'}
+                            className={`absolute w-[60px] h-[60px] rounded-full flex items-center justify-center font-bold transition-all duration-200 select-none shadow-sm touch-none border border-white/20 cursor-pointer ${
+                              planState === 'completed'
+                                ? 'bg-[#54519E] text-white shadow-[0_4px_16px_rgba(84,81,158,0.25)]'
+                                : isHolding
+                                ? 'bg-[#484591] text-white scale-95 shadow-inner'
+                                : 'bg-[#5E5BAE] hover:bg-[#524FA0] active:bg-[#484591] text-white shadow-[0_4px_18px_rgba(94,91,174,0.28)]'
+                            }`}
+                          >
+                            {planState === 'completed' ? (
+                              <Check className="w-6 h-6 stroke-[3] text-white" />
+                            ) : (
+                              <span className="font-bold text-[16px] tracking-tight text-white">Done</span>
+                            )}
+                          </button>
+                        </div>
+
+                        <span className="text-[12px] mt-2 whitespace-nowrap text-center font-normal">
+                          {planState === 'completed' ? (
+                            <span className="text-[#5E5BAE] font-semibold">Completed</span>
+                          ) : (
+                            <span className="text-[#706E8A]">Hold to complete</span>
+                          )}
+                        </span>
+                      </div>
+
+                      {/* Bottom Section: Side-by-Side "Plan B" and "Not today" (or Undo completion) */}
+                      <div className="flex items-center justify-center gap-7 pt-2.5 border-t border-[#26263F]/[0.06]">
+                        {planState === 'completed' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              hasCompletedRef.current = false;
+                              isHoldingRef.current = false;
+                              setPlanState('accepted');
+                              setHoldProgress(0);
+                            }}
+                            className="text-xs font-semibold text-[#46437B] hover:text-[#26263F] py-2 px-3 transition-colors whitespace-nowrap underline underline-offset-3 cursor-pointer min-h-[44px] flex items-center"
+                          >
+                            Undo completion
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleAcceptedPlanB}
+                              className="text-xs font-semibold text-[#46437B] hover:text-[#26263F] py-2 px-3 rounded-full hover:bg-white/50 transition-colors whitespace-nowrap cursor-pointer active:scale-95 min-h-[44px] flex items-center"
+                            >
+                              Plan B
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleNotToday}
+                              className="text-xs font-semibold text-[#46437B] hover:text-[#26263F] py-2 px-3 rounded-full hover:bg-white/50 transition-colors whitespace-nowrap cursor-pointer active:scale-95 min-h-[44px] flex items-center"
+                            >
+                              Not today
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+              </div>
+            </motion.div>
 
           </div>
         </div>
@@ -1418,7 +1553,7 @@ export default function App() {
                   shouldReduceMotion
                     ? { duration: 0.05 }
                     : {
-                        duration: 0.42,
+                        duration: 0.40,
                         ease: [0.32, 0.72, 0, 1],
                       }
                 }
