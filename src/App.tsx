@@ -138,43 +138,102 @@ export default function App() {
   // Layout and transition geometry refs
   const phoneFrameRef = useRef<HTMLDivElement>(null);
   const homeAvatarRef = useRef<HTMLDivElement>(null);
+  const chatSheetRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
 
   const [frameSize, setFrameSize] = useState<{ width: number; height: number }>({ width: 393, height: 844 });
-  const [homeAvatarRect, setHomeAvatarRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [sheetMeasuredHeight, setSheetMeasuredHeight] = useState<number>(0);
 
-  const measurePositions = useCallback(() => {
+  // Transition state: 'idle' (resting on home) | 'opening' | 'open' (docked at drawer) | 'closing'
+  const [transitionPhase, setTransitionPhase] = useState<'idle' | 'opening' | 'open' | 'closing'>('idle');
+  // Exact source coordinates measured dynamically from homeAvatarRef
+  const [transitionSourceRect, setTransitionSourceRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  // Measure live rect of homeAvatar inside phoneFrame at this exact instant
+  const getLiveHomeAvatarRect = useCallback(() => {
     if (homeAvatarRef.current && phoneFrameRef.current) {
       const fRect = phoneFrameRef.current.getBoundingClientRect();
       const hRect = homeAvatarRef.current.getBoundingClientRect();
-      if (fRect.width > 0 && fRect.height > 0) {
-        setFrameSize({ width: fRect.width, height: fRect.height });
-      }
-      if (hRect.width > 0 && hRect.height > 0) {
-        setHomeAvatarRect({
+      if (fRect.width > 0 && fRect.height > 0 && hRect.width > 0 && hRect.height > 0) {
+        return {
           top: hRect.top - fRect.top,
           left: hRect.left - fRect.left,
           width: hRect.width,
           height: hRect.height,
-        });
+        };
       }
     }
+    const fWidth = phoneFrameRef.current?.clientWidth || 393;
+    return {
+      top: 145,
+      left: (fWidth - 204) / 2,
+      width: 204,
+      height: 204,
+    };
   }, []);
 
+  // Update frame dimensions whenever phoneFrameRef resizes or viewport changes
   useEffect(() => {
-    measurePositions();
-    const handleResize = () => measurePositions();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [measurePositions]);
+    const frameEl = phoneFrameRef.current;
+    if (!frameEl) return;
+    const updateSize = () => {
+      const rect = frameEl.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setFrameSize({ width: rect.width, height: rect.height });
+      }
+    };
+    updateSize();
+
+    const ro = new ResizeObserver(() => updateSize());
+    ro.observe(frameEl);
+    window.addEventListener('resize', updateSize);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  // Dynamically observe chatSheet height when open or resizing
+  useEffect(() => {
+    const sheetEl = chatSheetRef.current;
+    if (!sheetEl) return;
+    const updateSheet = () => {
+      if (sheetEl.clientHeight > 0) {
+        setSheetMeasuredHeight(sheetEl.clientHeight);
+      }
+    };
+    updateSheet();
+    const ro = new ResizeObserver(() => updateSheet());
+    ro.observe(sheetEl);
+    return () => ro.disconnect();
+  }, [isChatOpen]);
 
   // Target coordinates for Nova docked at top edge of chat sheet
   const drawerWidth = 128;
   const drawerHeight = 128;
   const drawerLeft = (frameSize.width - drawerWidth) / 2;
-  const sheetHeight = Math.min(frameSize.height * 0.74, 580);
-  const sheetTop = frameSize.height - sheetHeight;
+  const effectiveSheetHeight = sheetMeasuredHeight > 0
+    ? sheetMeasuredHeight
+    : Math.min(frameSize.height * 0.74, 580);
+  const sheetTop = frameSize.height - effectiveSheetHeight;
   const drawerTop = sheetTop - 64; // Nova peeks over the drawer edge by 64px (-top-16)
+
+  // Coordinated Transition Open / Close triggers
+  const openChatWithTransition = useCallback((chatSetup?: () => void) => {
+    const liveRect = getLiveHomeAvatarRect();
+    setTransitionSourceRect(liveRect);
+    if (chatSetup) chatSetup();
+    setIsChatOpen(true);
+    setTransitionPhase('opening');
+  }, [getLiveHomeAvatarRect]);
+
+  const closeChatWithTransition = useCallback(() => {
+    const liveRect = getLiveHomeAvatarRect();
+    setTransitionSourceRect(liveRect);
+    setIsChatOpen(false);
+    setTransitionPhase('closing');
+  }, [getLiveHomeAvatarRect]);
 
   // Monitor user scrolling: if user scrolls up, do not force scroll down on new messages
   const handleChatScroll = useCallback(() => {
@@ -229,96 +288,99 @@ export default function App() {
 
   // Click "Plan B" on initial suggestion: Opens chat with proactive alternative
   const handleInitialPlanB = () => {
-    setShowPlanBHint(false);
-    setInputPlaceholder('Tell Nova what changed…');
-    isNearBottomRef.current = true;
-    setChatMessages([
-      {
-        id: 'msg-init-alt',
-        sender: 'ai',
-        text: 'How about a 5-minute stretch at home instead?',
-        options: [
-          {
-            label: 'Sounds good',
-            action: 'accept',
-            targetPlan: STRETCH_PLAN
-          },
-          {
-            label: 'Show me another option',
-            action: 'show_another'
-          },
-          {
-            label: 'Tell Nova what changed',
-            action: 'focus_input'
-          }
-        ]
-      }
-    ]);
-    setIsChatOpen(true);
+    openChatWithTransition(() => {
+      setShowPlanBHint(false);
+      setInputPlaceholder('Tell Nova what changed…');
+      isNearBottomRef.current = true;
+      setChatMessages([
+        {
+          id: 'msg-init-alt',
+          sender: 'ai',
+          text: 'How about a 5-minute stretch at home instead?',
+          options: [
+            {
+              label: 'Sounds good',
+              action: 'accept',
+              targetPlan: STRETCH_PLAN
+            },
+            {
+              label: 'Show me another option',
+              action: 'show_another'
+            },
+            {
+              label: 'Tell Nova what changed',
+              action: 'focus_input'
+            }
+          ]
+        }
+      ]);
+    });
   };
 
   // 2. Accepted State Handlers
   // Click "Plan B" on already accepted plan: Proactively offers alternative while keeping current plan until accepted
   const handleAcceptedPlanB = () => {
-    setInputPlaceholder('Tell Nova what changed…');
-    isNearBottomRef.current = true;
-    const alternative = currentPlan.id === 'walk' ? STRETCH_PLAN : TOMORROW_WALK_PLAN;
-    const alternativeText = currentPlan.id === 'walk'
-      ? 'How about a 5-minute stretch at home instead?'
-      : 'Would moving your walk to tomorrow work better?';
+    openChatWithTransition(() => {
+      setInputPlaceholder('Tell Nova what changed…');
+      isNearBottomRef.current = true;
+      const alternative = currentPlan.id === 'walk' ? STRETCH_PLAN : TOMORROW_WALK_PLAN;
+      const alternativeText = currentPlan.id === 'walk'
+        ? 'How about a 5-minute stretch at home instead?'
+        : 'Would moving your walk to tomorrow work better?';
 
-    setChatMessages([
-      {
-        id: 'msg-accepted-alt',
-        sender: 'ai',
-        text: alternativeText,
-        options: [
-          {
-            label: 'Sounds good',
-            action: 'accept',
-            targetPlan: alternative
-          },
-          {
-            label: 'Show me another option',
-            action: 'show_another'
-          },
-          {
-            label: 'Tell Nova what changed',
-            action: 'focus_input'
-          }
-        ]
-      }
-    ]);
-    setIsChatOpen(true);
+      setChatMessages([
+        {
+          id: 'msg-accepted-alt',
+          sender: 'ai',
+          text: alternativeText,
+          options: [
+            {
+              label: 'Sounds good',
+              action: 'accept',
+              targetPlan: alternative
+            },
+            {
+              label: 'Show me another option',
+              action: 'show_another'
+            },
+            {
+              label: 'Tell Nova what changed',
+              action: 'focus_input'
+            }
+          ]
+        }
+      ]);
+    });
   };
 
   // "Not today" on accepted plan: opens dialogue without auto-modifying or canceling
   const handleNotToday = () => {
-    setInputPlaceholder('Tell Nova what changed…');
-    isNearBottomRef.current = true;
-    setChatMessages([
-      {
-        id: 'msg-not-today',
-        sender: 'ai',
-        text: 'Totally fine! Rest days are just as healthy. Shall we take today off and reset tomorrow?',
-        options: [
-          {
-            label: 'Sounds good (Take today off)',
-            action: 'accept',
-            targetPlan: REST_DAY_PLAN
-          },
-          {
-            label: 'Keep plan for now',
-            action: 'keep_plan'
-          },
-          {
-            label: 'Tell Nova what changed',
-            action: 'focus_input'
-          }
-        ]
-      }
-    ]);
-    setIsChatOpen(true);
+    openChatWithTransition(() => {
+      setInputPlaceholder('Tell Nova what changed…');
+      isNearBottomRef.current = true;
+      setChatMessages([
+        {
+          id: 'msg-not-today',
+          sender: 'ai',
+          text: 'Totally fine! Rest days are just as healthy. Shall we take today off and reset tomorrow?',
+          options: [
+            {
+              label: 'Sounds good (Take today off)',
+              action: 'accept',
+              targetPlan: REST_DAY_PLAN
+            },
+            {
+              label: 'Keep plan for now',
+              action: 'keep_plan'
+            },
+            {
+              label: 'Tell Nova what changed',
+              action: 'focus_input'
+            }
+          ]
+        }
+      ]);
+    });
   };
 
   // 3. Option Action Handler inside chat
@@ -457,7 +519,7 @@ export default function App() {
             : m
         )
       );
-      setIsChatOpen(false);
+      closeChatWithTransition();
     }
   };
 
@@ -628,35 +690,36 @@ export default function App() {
 
   // Handle push message action
   const handleTellPlanB = () => {
-    setChatMessages([
-      {
-        id: 'msg-push',
-        sender: 'user',
-        text: "About yesterday's walk..."
-      },
-      {
-        id: 'ai-push',
-        sender: 'ai',
-        text: "I'm listening! Did you get a chance to step outside, or did life get in the way?",
-        options: [
-          {
-            label: 'Did 5-minute stretch instead',
-            action: 'accept',
-            targetPlan: STRETCH_PLAN
-          },
-          {
-            label: 'Life got busy, took rest',
-            action: 'accept',
-            targetPlan: REST_DAY_PLAN
-          },
-          {
-            label: 'Tell Nova what changed',
-            action: 'focus_input'
-          }
-        ]
-      }
-    ]);
-    setIsChatOpen(true);
+    openChatWithTransition(() => {
+      setChatMessages([
+        {
+          id: 'msg-push',
+          sender: 'user',
+          text: "About yesterday's walk..."
+        },
+        {
+          id: 'ai-push',
+          sender: 'ai',
+          text: "I'm listening! Did you get a chance to step outside, or did life get in the way?",
+          options: [
+            {
+              label: 'Did 5-minute stretch instead',
+              action: 'accept',
+              targetPlan: STRETCH_PLAN
+            },
+            {
+              label: 'Life got busy, took rest',
+              action: 'accept',
+              targetPlan: REST_DAY_PLAN
+            },
+            {
+              label: 'Tell Nova what changed',
+              action: 'focus_input'
+            }
+          ]
+        }
+      ]);
+    });
   };
 
   // SVG circular progress calculation (enlarged by ~1.4x, radius 34)
@@ -684,58 +747,76 @@ export default function App() {
           <div className="absolute top-[38%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-radial from-white/60 via-white/20 to-transparent blur-2xl" />
         </div>
 
-        {/* Unified Animated Nova Companion (Seamlessly transitions between Home & Drawer top edge) */}
-        <motion.div
-          className="absolute pointer-events-none select-none z-50 flex items-center justify-center"
-          initial={false}
-          animate={{
-            top: isChatOpen ? drawerTop : (homeAvatarRect?.top ?? 145),
-            left: isChatOpen ? drawerLeft : (homeAvatarRect?.left ?? ((frameSize.width - 204) / 2)),
-            width: isChatOpen ? 128 : (homeAvatarRect?.width ?? 204),
-            height: isChatOpen ? 128 : (homeAvatarRect?.height ?? 204),
-          }}
-          transition={
-            shouldReduceMotion
-              ? { duration: 0.05 }
-              : {
-                  duration: isChatOpen ? 0.44 : 0.38,
-                  ease: isChatOpen ? [0.32, 0.72, 0, 1] : [0.25, 1, 0.5, 1],
-                }
-          }
-        >
-          {/* Soft lilac & warm cream halo behind character (fades out as Nova descends to drawer) */}
-          <motion.div 
-            animate={{ opacity: isChatOpen ? 0 : 0.85, scale: isChatOpen ? 0.6 : 1 }}
-            transition={{ duration: isChatOpen ? 0.25 : 0.35 }}
-            className="absolute inset-1 rounded-full bg-radial from-[#F3EEFE]/80 via-[#FDF3ED]/35 to-transparent blur-2xl pointer-events-none -z-10" 
-          />
-
-          {/* Home Nova image (smoothly crossfades out as it approaches drawer rim) */}
-          <motion.img
-            src={IP_IMAGE_URL}
-            alt="Plan B Companion Nova"
-            referrerPolicy="no-referrer"
-            animate={{ opacity: isChatOpen ? 0 : 1 }}
-            transition={{ 
-              duration: shouldReduceMotion ? 0.05 : (isChatOpen ? 0.22 : 0.26),
-              delay: shouldReduceMotion ? 0 : (isChatOpen ? 0.14 : 0)
+        {/* Unified Animated Transition Nova (Active during opening, open, or closing) */}
+        {(isChatOpen || transitionPhase !== 'idle') && (
+          <motion.div
+            className="absolute pointer-events-none select-none z-50 flex items-center justify-center"
+            initial={
+              transitionSourceRect
+                ? {
+                    top: transitionSourceRect.top,
+                    left: transitionSourceRect.left,
+                    width: transitionSourceRect.width,
+                    height: transitionSourceRect.height,
+                  }
+                : false
+            }
+            animate={{
+              top: isChatOpen ? drawerTop : (transitionSourceRect?.top ?? 145),
+              left: isChatOpen ? drawerLeft : (transitionSourceRect?.left ?? ((frameSize.width - 204) / 2)),
+              width: isChatOpen ? 128 : (transitionSourceRect?.width ?? 204),
+              height: isChatOpen ? 128 : (transitionSourceRect?.height ?? 204),
             }}
-            className="w-full h-full object-contain pointer-events-none drop-shadow-xs [mask-image:linear-gradient(to_bottom,black_86%,transparent_100%)] absolute inset-0"
-          />
-
-          {/* Listening Nova image (smoothly crossfades in as it arrives at drawer rim) */}
-          <motion.img
-            src={NOVA_LISTENING_URL}
-            alt="Nova listening"
-            referrerPolicy="no-referrer"
-            animate={{ opacity: isChatOpen ? 1 : 0 }}
-            transition={{ 
-              duration: shouldReduceMotion ? 0.05 : (isChatOpen ? 0.26 : 0.2),
-              delay: shouldReduceMotion ? 0 : (isChatOpen ? 0.16 : 0)
+            transition={
+              shouldReduceMotion
+                ? { duration: 0.05 }
+                : {
+                    duration: isChatOpen ? 0.42 : 0.36,
+                    ease: isChatOpen ? [0.32, 0.72, 0, 1] : [0.25, 1, 0.5, 1],
+                  }
+            }
+            onAnimationComplete={() => {
+              if (!isChatOpen) {
+                setTransitionPhase('idle');
+              } else {
+                setTransitionPhase('open');
+              }
             }}
-            className="w-full h-full object-contain pointer-events-none drop-shadow-xs absolute inset-0"
-          />
-        </motion.div>
+          >
+            {/* Soft lilac & warm cream halo behind character (fades out as Nova descends to drawer) */}
+            <motion.div 
+              animate={{ opacity: isChatOpen ? 0 : 0.85, scale: isChatOpen ? 0.6 : 1 }}
+              transition={{ duration: isChatOpen ? 0.25 : 0.32 }}
+              className="absolute inset-1 rounded-full bg-radial from-[#F3EEFE]/80 via-[#FDF3ED]/35 to-transparent blur-2xl pointer-events-none -z-10" 
+            />
+
+            {/* Home Nova image (smoothly crossfades out as it approaches drawer rim) */}
+            <motion.img
+              src={IP_IMAGE_URL}
+              alt="Plan B Companion Nova"
+              referrerPolicy="no-referrer"
+              animate={{ opacity: isChatOpen ? 0 : 1 }}
+              transition={{ 
+                duration: shouldReduceMotion ? 0.05 : (isChatOpen ? 0.20 : 0.24),
+                delay: shouldReduceMotion ? 0 : (isChatOpen ? 0.12 : 0)
+              }}
+              className="w-full h-full object-contain pointer-events-none drop-shadow-xs [mask-image:linear-gradient(to_bottom,black_86%,transparent_100%)] absolute inset-0"
+            />
+
+            {/* Listening Nova image (smoothly crossfades in as it arrives at drawer rim) */}
+            <motion.img
+              src={NOVA_LISTENING_URL}
+              alt="Nova listening"
+              referrerPolicy="no-referrer"
+              animate={{ opacity: isChatOpen ? 1 : 0 }}
+              transition={{ 
+                duration: shouldReduceMotion ? 0.05 : (isChatOpen ? 0.24 : 0.20),
+                delay: shouldReduceMotion ? 0 : (isChatOpen ? 0.16 : 0)
+              }}
+              className="w-full h-full object-contain pointer-events-none drop-shadow-xs absolute inset-0"
+            />
+          </motion.div>
+        )}
 
         {/* 1. iOS Status Bar (44px Height Standard Safe Area) */}
         <div className="pt-3.5 pb-1 px-7 flex items-center justify-between text-xs font-semibold text-[#26263F] select-none shrink-0 z-30">
@@ -777,18 +858,35 @@ export default function App() {
 
         {/* 3. Main Body Content: Balanced vertical layout with 24px margins */}
         <div 
-          onScroll={measurePositions}
           className="flex-1 overflow-y-auto px-6 pt-1 pb-3 flex flex-col items-center justify-center scrollbar-none z-10"
         >
           <div className="w-full flex flex-col items-center my-auto py-1">
             
             {/* Unified Companion Section: IP + Nickname + Speech */}
             <div className="w-full flex flex-col items-center justify-center shrink-0 mb-5 sm:mb-6">
-              {/* Centered IP Character Bust spacer (holds geometry in document flow) */}
+              {/* Centered IP Character Bust: Natively placed in document flow */}
               <div 
                 ref={homeAvatarRef}
                 className="relative w-[196px] h-[196px] sm:w-[208px] sm:h-[208px] flex items-center justify-center pointer-events-none shrink-0"
-              />
+              >
+                {/* In-place Home Nova: Visible when idle on home, hidden during active transition */}
+                <div 
+                  className={`w-full h-full relative transition-opacity duration-200 ${
+                    transitionPhase === 'idle' && !isChatOpen ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  {/* Soft lilac & warm cream halo behind character */}
+                  <div className="absolute inset-1 rounded-full bg-radial from-[#F3EEFE]/80 via-[#FDF3ED]/35 to-transparent blur-2xl pointer-events-none -z-10" />
+
+                  {/* Home Nova image */}
+                  <img
+                    src={IP_IMAGE_URL}
+                    alt="Plan B Companion Nova"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-contain pointer-events-none drop-shadow-xs [mask-image:linear-gradient(to_bottom,black_86%,transparent_100%)] absolute inset-0"
+                  />
+                </div>
+              </div>
 
               {/* 1. Centered Nickname "Nova": 8-12px below visible Avatar */}
               <h2 className="text-[18px] font-bold text-[#26263F] tracking-tight text-center mt-2.5 select-none leading-none">
@@ -1022,15 +1120,16 @@ export default function App() {
           <button 
             type="button"
             onClick={() => {
-              setInputPlaceholder('Type your response…');
-              setChatMessages([
-                {
-                  id: 'msg-open-input',
-                  sender: 'ai',
-                  text: "Hi! How's your day shaping up? Tell me whatever is on your mind."
-                }
-              ]);
-              setIsChatOpen(true);
+              openChatWithTransition(() => {
+                setInputPlaceholder('Type your response…');
+                setChatMessages([
+                  {
+                    id: 'msg-open-input',
+                    sender: 'ai',
+                    text: "Hi! How's your day shaping up? Tell me whatever is on your mind."
+                  }
+                ]);
+              });
             }}
             className="w-full bg-white/70 hover:bg-white/85 backdrop-blur-md rounded-full px-5 py-3 flex items-center gap-3 border border-white/80 shadow-[0_2px_12px_rgba(90,80,140,0.04)] cursor-pointer min-h-[48px] transition-all text-left"
             aria-label="Talk to Nova"
@@ -1167,18 +1266,19 @@ export default function App() {
         <AnimatePresence>
           {isChatOpen && (
             <div className="absolute inset-0 z-40 overflow-hidden flex flex-col justify-end pointer-events-auto">
-              {/* Dimmed Backdrop */}
+              {/* Dimmed Backdrop (Softened to bg-black/16 backdrop-blur-[1.5px] so Home contours remain discernible) */}
               <motion.div 
-                onClick={() => setIsChatOpen(false)} 
+                onClick={closeChatWithTransition} 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={shouldReduceMotion ? { duration: 0.05 } : { duration: 0.38, ease: "easeInOut" }}
-                className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" 
+                transition={shouldReduceMotion ? { duration: 0.05 } : { duration: 0.36, ease: "easeInOut" }}
+                className="absolute inset-0 bg-black/16 backdrop-blur-[1.5px]" 
               />
 
               {/* Drawer Sheet */}
               <motion.div 
+                ref={chatSheetRef}
                 initial={shouldReduceMotion ? { y: 0, opacity: 0 } : { y: '100%' }}
                 animate={shouldReduceMotion ? { y: 0, opacity: 1 } : { y: 0 }}
                 exit={shouldReduceMotion ? { y: 0, opacity: 0 } : { y: '100%' }}
@@ -1186,7 +1286,7 @@ export default function App() {
                   shouldReduceMotion
                     ? { duration: 0.05 }
                     : {
-                        duration: 0.42,
+                        duration: 0.40,
                         ease: [0.32, 0.72, 0, 1],
                       }
                 }
@@ -1195,7 +1295,7 @@ export default function App() {
                 {/* Close Button Top-Right (Independent of Nova) */}
                 <button
                   type="button"
-                  onClick={() => setIsChatOpen(false)}
+                  onClick={closeChatWithTransition}
                   className="absolute top-3.5 right-4 z-40 w-9 h-9 rounded-full flex items-center justify-center text-[#706E8A] bg-white/60 hover:bg-white/90 border border-white/70 shadow-2xs active:scale-95 transition-all"
                   aria-label="Close"
                 >
