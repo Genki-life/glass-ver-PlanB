@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { 
-  MessageSquare, 
   Mic, 
   Calendar, 
   Sliders, 
@@ -16,8 +15,13 @@ import {
   Clock,
   Sparkles,
   Wifi,
-  CornerDownRight
+  CornerDownRight,
+  Bookmark
 } from 'lucide-react';
+
+import { MyPlanView } from './components/MyPlanView';
+import { DiscoverView } from './components/DiscoverView';
+import { MemoryView } from './components/MemoryView';
 
 const IP_IMAGE_URL = '/kila-home.png';
 const NOVA_LISTENING_URL = '/kila-listening.png';
@@ -110,6 +114,16 @@ export default function App() {
   
   // "Find another way" light hint for first-time users (disappears once Plan B is tapped)
   const [showPlanBHint, setShowPlanBHint] = useState<boolean>(true);
+
+  // Discover tab saved bookmarks state
+  const [savedItemIds, setSavedItemIds] = useState<string[]>(['walk-mindful', 'desk-decompression']);
+  const [isSavedSheetOpen, setIsSavedSheetOpen] = useState<boolean>(false);
+
+  const handleToggleSave = useCallback((id: string) => {
+    setSavedItemIds(prev => 
+      prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]
+    );
+  }, []);
 
   // Hold-to-complete animation state (3 seconds = 3000ms)
   const HOLD_DURATION_MS = 3000;
@@ -445,15 +459,6 @@ export default function App() {
       window.visualViewport?.removeEventListener('resize', handleViewportChange);
     };
   }, [isChatOpen]);
-
-  // Push / Care message toggle
-  const [showPushMessage, setShowPushMessage] = useState(false);
-  const [hasUnreadNotification, setHasUnreadNotification] = useState(true);
-
-  const handleToggleNotification = () => {
-    setShowPushMessage((prev) => !prev);
-    setHasUnreadNotification(false);
-  };
 
   // 1. Initial State Handlers
   // "Sounds good" directly accepts current recommendation into "YOUR PLAN"
@@ -1119,25 +1124,37 @@ export default function App() {
         {/* 2. Top Header Bar (24px horizontal padding) */}
         <header className="px-6 pt-1 pb-1.5 flex items-center justify-between shrink-0 z-20">
           <span className="text-[24px] font-bold tracking-tight text-[#26263F]">
-            Plan B
+            {activeTab === 'Today' ? 'Plan B' : activeTab}
           </span>
-          <button 
-            type="button"
-            onClick={handleToggleNotification}
-            className="relative w-10 h-10 rounded-full flex items-center justify-center text-[#26263F] bg-white/50 hover:bg-white/80 border border-white/75 backdrop-blur-md active:scale-95 transition-all shadow-[0_2px_8px_rgba(94,91,174,0.06)]"
-            aria-label="Messages"
-            title={showPushMessage ? "Switch to daily care" : "View push message"}
-          >
-            <MessageSquare className="w-5 h-5 stroke-[2]" />
-            {hasUnreadNotification && (
-              <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-[#FF7A32] ring-2 ring-white" />
-            )}
-          </button>
+          {activeTab === 'My Plan' && (
+            <span className="text-xs font-semibold text-[#5E5BAE] bg-[#5E5BAE]/10 border border-[#5E5BAE]/20 px-2.5 py-0.5 rounded-full">
+              Overview
+            </span>
+          )}
+          {activeTab === 'Discover' && (
+            <button
+              type="button"
+              id="top-saved-btn"
+              onClick={() => setIsSavedSheetOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/75 hover:bg-white/95 border border-white/85 shadow-2xs text-xs font-semibold text-[#5E5BAE] transition-all cursor-pointer active:scale-95"
+              aria-label="View saved items"
+            >
+              <Bookmark className="w-3.5 h-3.5 fill-current" />
+              <span>Saved ({savedItemIds.length})</span>
+            </button>
+          )}
+          {activeTab === 'Memory' && (
+            <span className="text-xs font-semibold text-[#5E5BAE] bg-[#5E5BAE]/10 border border-[#5E5BAE]/20 px-2.5 py-0.5 rounded-full">
+              What Nova knows
+            </span>
+          )}
         </header>
 
-        {/* 3. Main Body Content: Balanced vertical layout with 24px margins */}
+        {/* 3. Main Body Content: Today View */}
         <div 
-          className="flex-1 overflow-y-auto px-6 pt-2 pb-5 flex flex-col items-center justify-start scrollbar-none z-10 overscroll-contain"
+          className={`flex-1 overflow-y-auto px-6 pt-2 pb-5 flex-col items-center justify-start scrollbar-none z-10 overscroll-contain ${
+            activeTab === 'Today' ? 'flex' : 'hidden'
+          }`}
         >
           <div className="w-full flex flex-col items-center py-1">
             
@@ -1174,25 +1191,9 @@ export default function App() {
 
               {/* 2. Lightweight Speech Area: 16-20px below "Nova" */}
               <div className="mt-3.5 sm:mt-4 text-center px-4 transition-all duration-300">
-                {!showPushMessage ? (
-                  <p className="text-[14px] font-normal text-[#5D5B78] leading-snug tracking-normal animate-in fade-in duration-300">
-                    Hope your morning is going a little easier.
-                  </p>
-                ) : (
-                  <div className="flex flex-col items-center gap-1 animate-in fade-in duration-300">
-                    <p className="text-[14px] font-normal text-[#26263F] leading-snug">
-                      Did you get a chance to take that walk yesterday?
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleTellPlanB}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#5E5BAE] hover:text-[#4B4897] active:scale-95 transition-all underline underline-offset-3 mt-0.5"
-                    >
-                      <span>Tell Plan B</span>
-                      <ChevronRight className="w-3 h-3 stroke-[2.4]" />
-                    </button>
-                  </div>
-                )}
+                <p className="text-[14px] font-normal text-[#5D5B78] leading-snug tracking-normal animate-in fade-in duration-300">
+                  Hope your morning is going a little easier.
+                </p>
               </div>
             </div>
 
@@ -1465,6 +1466,27 @@ export default function App() {
             </motion.div>
 
           </div>
+        </div>
+
+        {/* 3. Main Body Content: My Plan View */}
+        <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'My Plan' ? 'flex' : 'hidden'}`}>
+          <MyPlanView phoneFrameRef={phoneFrameRef} />
+        </div>
+
+        {/* 3. Main Body Content: Discover View */}
+        <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'Discover' ? 'flex' : 'hidden'}`}>
+          <DiscoverView
+            phoneFrameRef={phoneFrameRef}
+            savedItemIds={savedItemIds}
+            onToggleSave={handleToggleSave}
+            isSavedSheetOpen={isSavedSheetOpen}
+            setIsSavedSheetOpen={setIsSavedSheetOpen}
+          />
+        </div>
+
+        {/* 3. Main Body Content: Memory Tab */}
+        <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'Memory' ? 'flex' : 'hidden'}`}>
+          <MemoryView phoneFrameRef={phoneFrameRef} />
         </div>
 
         {/* 4. Bottom Pinned Section: Conversational Input & 4 Navigation Tabs */}
