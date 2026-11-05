@@ -16,10 +16,15 @@ import {
   Info
 } from 'lucide-react';
 
-const COVER_TRAIL = '/src/assets/images/discover_trail_1793765793796.jpg';
-const COVER_STRETCH = '/src/assets/images/discover_stretch_1793765824456.jpg';
-const COVER_EVENING = '/src/assets/images/discover_evening_1793765838258.jpg';
-const COVER_BREATH = '/src/assets/images/discover_breath_1793765860138.jpg';
+import coverTrail from '../assets/images/discover_trail_1793765793796.jpg';
+import coverStretch from '../assets/images/discover_stretch_1793765824456.jpg';
+import coverEvening from '../assets/images/discover_evening_1793765838258.jpg';
+import coverBreath from '../assets/images/discover_breath_1793765860138.jpg';
+
+const COVER_TRAIL = coverTrail;
+const COVER_STRETCH = coverStretch;
+const COVER_EVENING = coverEvening;
+const COVER_BREATH = coverBreath;
 
 export interface DiscoverItem {
   id: string;
@@ -134,31 +139,46 @@ export function DiscoverView({
   // Selected content item for detail slide-up sheet
   const [selectedItem, setSelectedItem] = useState<DiscoverItem | null>(null);
 
-  // Audio guide demo play state inside detail sheet
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  // Audio guide placeholder notification state
+  const [showAudioPlaceholderToast, setShowAudioPlaceholderToast] = useState(false);
 
-  // Toast notification state when item is added to today's plan
-  const [showPlanAddedToast, setShowPlanAddedToast] = useState(false);
+  // Toast notification state when "Add to Today's Plan" is tapped (explicit unimplemented state)
+  const [showPlanUnimplementedToast, setShowPlanUnimplementedToast] = useState(false);
 
   const handleAddToPlan = () => {
-    setShowPlanAddedToast(true);
-    setTimeout(() => setShowPlanAddedToast(false), 2400);
+    setShowPlanUnimplementedToast(true);
+    setTimeout(() => setShowPlanUnimplementedToast(false), 2600);
   };
 
   return (
     <div className="flex-1 overflow-y-auto px-6 pt-1 pb-10 flex flex-col gap-4.5 scrollbar-none overscroll-contain z-10 text-[#26263F]">
       
-      {/* Plan Added Toast Notification */}
+      {/* Explicit Unimplemented Toast Notification */}
       <AnimatePresence>
-        {showPlanAddedToast && (
+        {showPlanUnimplementedToast && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="fixed top-14 left-1/2 -translate-x-1/2 bg-[#5E5BAE] text-white px-4 py-2.5 rounded-full text-xs font-semibold shadow-lg flex items-center gap-2 z-50 pointer-events-none"
+            className="fixed top-14 left-1/2 -translate-x-1/2 bg-[#26263F]/90 text-white px-4 py-2.5 rounded-full text-xs font-medium shadow-lg flex items-center gap-2 z-50 pointer-events-none backdrop-blur-md"
           >
-            <Check className="w-4 h-4 stroke-[2.5]" />
-            <span>Added to Today's Plan suggestions!</span>
+            <Clock className="w-4 h-4 text-[#E59980] stroke-[2.2]" />
+            <span>Not yet implemented • Adding to Today's Plan is coming soon</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Audio Demo Placeholder Notification */}
+      <AnimatePresence>
+        {showAudioPlaceholderToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="fixed top-14 left-1/2 -translate-x-1/2 bg-[#26263F]/90 text-white px-4 py-2.5 rounded-full text-xs font-medium shadow-lg flex items-center gap-2 z-50 pointer-events-none backdrop-blur-md"
+          >
+            <Info className="w-4 h-4 text-[#8E8CD6] stroke-[2.2]" />
+            <span>Sample audio placeholder • Real media not connected</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -283,10 +303,7 @@ export function DiscoverView({
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
-                  onClick={() => {
-                    setSelectedItem(null);
-                    setIsPlayingAudio(false);
-                  }}
+                  onClick={() => setSelectedItem(null)}
                   className="absolute inset-0 bg-black/25 backdrop-blur-xs"
                 />
 
@@ -297,6 +314,7 @@ export function DiscoverView({
                   exit={{ y: '100%' }}
                   transition={{ type: 'spring', damping: 28, stiffness: 280 }}
                   className="relative w-full max-h-[88%] bg-[#FAF7F2] rounded-t-[34px] shadow-2xl border-t border-white/90 overflow-y-auto z-10 flex flex-col text-[#26263F]"
+                  id="discover-detail-sheet"
                 >
                   {/* Sheet Header */}
                   <div className="px-6 pt-5 pb-3 border-b border-[#26263F]/[0.06] flex items-center justify-between shrink-0">
@@ -325,10 +343,7 @@ export function DiscoverView({
                       {/* Close button */}
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedItem(null);
-                          setIsPlayingAudio(false);
-                        }}
+                        onClick={() => setSelectedItem(null)}
                         className="w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-[#26263F] transition-colors cursor-pointer"
                         aria-label="Close"
                       >
@@ -348,11 +363,16 @@ export function DiscoverView({
                         className="w-full h-full object-cover"
                       />
 
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/20 to-transparent flex items-end p-4">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent flex items-end p-4">
                         <div className="flex items-center justify-between w-full text-white">
-                          <div>
-                            <div className="text-xs font-bold leading-tight">
-                              {selectedItem.audioGuideTitle}
+                          <div className="pr-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold leading-tight">
+                                {selectedItem.audioGuideTitle}
+                              </span>
+                              <span className="text-[9.5px] font-bold uppercase tracking-wider text-white/90 bg-white/20 backdrop-blur-md px-1.5 py-0.5 rounded-full border border-white/25">
+                                Sample Preview
+                              </span>
                             </div>
                             <div className="text-[10.5px] text-white/85 mt-0.5">
                               {selectedItem.audioGuideSubtitle}
@@ -361,17 +381,26 @@ export function DiscoverView({
 
                           <button
                             type="button"
-                            onClick={() => setIsPlayingAudio(!isPlayingAudio)}
-                            className="w-9 h-9 rounded-full bg-[#5E5BAE] hover:bg-[#524FA0] text-white flex items-center justify-center shadow-xs active:scale-95 transition-transform cursor-pointer"
-                            aria-label={isPlayingAudio ? "Pause session" : "Play session"}
+                            onClick={() => {
+                              setShowAudioPlaceholderToast(true);
+                              setTimeout(() => setShowAudioPlaceholderToast(false), 2600);
+                            }}
+                            className="h-8 px-3 rounded-full bg-white/25 hover:bg-white/35 active:scale-95 text-white flex items-center gap-1.5 shadow-xs border border-white/30 backdrop-blur-md transition-all cursor-pointer shrink-0"
+                            aria-label="Sample audio player placeholder"
+                            title="Sample audio player placeholder"
                           >
-                            {isPlayingAudio ? (
-                              <Volume2 className="w-4 h-4 stroke-[2.4] text-white" />
-                            ) : (
-                              <Play className="w-4 h-4 fill-white text-white ml-0.5" />
-                            )}
+                            <Play className="w-3.5 h-3.5 fill-white text-white ml-0.5" />
+                            <span className="text-[11px] font-semibold">Sample</span>
                           </button>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Media sample status disclosure */}
+                    <div className="p-3 rounded-[16px] bg-[#FAF8FD] border border-[#5E5BAE]/15 flex items-start gap-2 text-xs text-[#5D5B78]">
+                      <Info className="w-3.5 h-3.5 text-[#5E5BAE] shrink-0 mt-0.5 stroke-[2]" />
+                      <div className="text-[11.5px] leading-relaxed">
+                        <span className="font-semibold text-[#26263F]">Audio sample placeholder:</span> Real audio streaming is not yet connected in this prototype.
                       </div>
                     </div>
 
@@ -419,18 +448,18 @@ export function DiscoverView({
                       <button
                         type="button"
                         onClick={handleAddToPlan}
-                        className="w-full py-3 rounded-[18px] bg-[#5E5BAE] hover:bg-[#524FA0] text-white text-xs font-bold shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        className="w-full py-3 rounded-[18px] bg-white/75 hover:bg-white/90 text-[#7A7895] hover:text-[#26263F] border border-white/85 text-xs font-bold shadow-xs active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
                       >
-                        <PlusCircle className="w-4 h-4 stroke-[2.2]" />
-                        <span>Add to Today's Plan Suggestions</span>
+                        <Clock className="w-4 h-4 stroke-[2.2] text-[#7A7895]" />
+                        <span>Add to Today's Plan (Coming Soon)</span>
+                        <span className="text-[10px] bg-[#26263F]/[0.06] text-[#7A7895] px-2 py-0.5 rounded-full font-medium">
+                          Not implemented
+                        </span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedItem(null);
-                          setIsPlayingAudio(false);
-                        }}
+                        onClick={() => setSelectedItem(null)}
                         className="w-full py-2.5 rounded-[16px] bg-white/70 hover:bg-white text-[#7A7895] text-xs font-semibold border border-white/80 active:scale-[0.98] transition-all cursor-pointer"
                       >
                         Close

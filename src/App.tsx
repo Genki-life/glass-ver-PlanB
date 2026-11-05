@@ -23,9 +23,11 @@ import { MyPlanView } from './components/MyPlanView';
 import { DiscoverView } from './components/DiscoverView';
 import { MemoryView } from './components/MemoryView';
 
+import thumbImageUrl from './assets/images/mindful_walk_thumb_1793264566501.jpg';
+
 const IP_IMAGE_URL = '/kila-home.png';
 const NOVA_LISTENING_URL = '/kila-listening.png';
-const THUMB_IMAGE_URL = '/src/assets/images/mindful_walk_thumb_1793264566501.jpg';
+const THUMB_IMAGE_URL = thumbImageUrl;
 
 // Plan Information Model
 interface PlanItem {
