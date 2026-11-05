@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -100,26 +100,20 @@ const RHYTHM_RECENT_DATA: Record<'7d' | 'month', RhythmRecentDataSet> = {
 };
 
 // ============================================================
-// Activity Monthly Records Data Model (Real Date Anchor: Nov 4, 2026)
+// Activity Monthly Records Data Model (Device Local Date Driven)
 // ============================================================
-export const CURRENT_YEAR = 2026;
-export const CURRENT_MONTH = 10; // 0-indexed: 10 is November
-export const CURRENT_DAY = 4; // Actual current day: Nov 4, 2026
-export const TODAY_DATE_STR = '2026-11-04';
+export function getDeviceLocalDate(): { year: number; month: number; day: number; dateStr: string } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed: 0 = January, 11 = December
+  const day = now.getDate();
+  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { year, month, day, dateStr };
+}
 
 export const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
-];
-
-export const AVAILABLE_MONTH_LIST = [
-  { year: 2026, month: 5, label: 'June 2026' },
-  { year: 2026, month: 6, label: 'July 2026' },
-  { year: 2026, month: 7, label: 'August 2026' },
-  { year: 2026, month: 8, label: 'September 2026' },
-  { year: 2026, month: 9, label: 'October 2026' },
-  { year: 2026, month: 10, label: 'November 2026', isCurrent: true },
-  { year: 2026, month: 11, label: 'December 2026' },
 ];
 
 export type ActivityRecordType = 'active' | 'rest' | 'none';
@@ -137,37 +131,19 @@ export interface DayActivityRecord {
 
 export function generateInitialActivityLogs(): Record<string, DayActivityRecord> {
   const logs: Record<string, DayActivityRecord> = {};
+  const now = new Date();
 
-  // November 2026 (Current month, today is Nov 4)
-  logs['2026-11-01'] = {
-    date: '2026-11-01',
-    type: 'rest',
-    title: 'Mindful rest day',
-    durationMinutes: 0,
-    category: 'rest',
-    note: 'Autonomic recovery & restorative breathing',
-    isSample: true,
+  const formatYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   };
-  logs['2026-11-02'] = {
-    date: '2026-11-02',
-    type: 'active',
-    title: '5-min gentle stretch',
-    durationMinutes: 5,
-    category: 'stretch',
-    note: 'Afternoon desk shoulder & neck release',
-    isSample: true,
-  };
-  logs['2026-11-03'] = {
-    date: '2026-11-03',
-    type: 'active',
-    title: '15-min mindful walk',
-    durationMinutes: 15,
-    category: 'walk',
-    note: 'Unhurried neighborhood walk at 1:15 PM',
-    isSample: true,
-  };
-  logs['2026-11-04'] = {
-    date: '2026-11-04',
+
+  // Seed Today with an initial completed session
+  const todayStr = formatYMD(now);
+  logs[todayStr] = {
+    date: todayStr,
     type: 'active',
     title: '15-min mindful walk (Today)',
     durationMinutes: 15,
@@ -176,144 +152,68 @@ export function generateInitialActivityLogs(): Record<string, DayActivityRecord>
     isSample: true,
   };
 
-  // October 2026 (21 active, 5 rest)
-  const octActiveDays = [1, 2, 4, 5, 7, 8, 9, 11, 12, 14, 15, 16, 18, 19, 21, 22, 23, 25, 26, 28, 29];
-  const octRestDays = [3, 10, 17, 24, 31];
-  for (const day of octActiveDays) {
-    const dStr = `2026-10-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'active',
-      title: day % 2 === 0 ? '15-min mindful walk' : '5-min gentle stretch',
-      durationMinutes: day % 2 === 0 ? 15 : 5,
-      category: day % 2 === 0 ? 'walk' : 'stretch',
-      note: 'Consistent mid-day movement session',
-      isSample: true,
-    };
-  }
-  for (const day of octRestDays) {
-    const dStr = `2026-10-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'rest',
-      title: 'Mindful rest day',
-      durationMinutes: 0,
-      category: 'rest',
-      note: 'Intentional recovery buffer',
-      isSample: true,
-    };
-  }
+  // Seed recent 90 days backwards dynamically from user's current device date
+  for (let i = 1; i <= 90; i++) {
+    const pastDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const dateStr = formatYMD(pastDate);
+    const dayOfWeek = pastDate.getDay();
 
-  // September 2026 (19 active, 4 rest)
-  const sepActiveDays = [1, 2, 4, 5, 7, 8, 9, 11, 12, 14, 15, 16, 18, 19, 22, 23, 25, 26, 29];
-  const sepRestDays = [3, 10, 17, 24];
-  for (const day of sepActiveDays) {
-    const dStr = `2026-09-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'active',
-      title: day % 3 === 0 ? '20-min nature stride' : '15-min mindful walk',
-      durationMinutes: day % 3 === 0 ? 20 : 15,
-      category: 'walk',
-      note: 'Gentle aerobic reset',
-      isSample: true,
-    };
-  }
-  for (const day of sepRestDays) {
-    const dStr = `2026-09-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'rest',
-      title: 'Mindful rest day',
-      durationMinutes: 0,
-      category: 'rest',
-      note: 'Restored energy without guilt',
-      isSample: true,
-    };
-  }
-
-  // August 2026 (15 active, 6 rest)
-  const augActiveDays = [1, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28];
-  const augRestDays = [2, 7, 13, 19, 25, 30];
-  for (const day of augActiveDays) {
-    const dStr = `2026-08-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'active',
-      title: '15-min mindful walk',
-      durationMinutes: 15,
-      category: 'walk',
-      note: 'Morning outdoor pace',
-      isSample: true,
-    };
-  }
-  for (const day of augRestDays) {
-    const dStr = `2026-08-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'rest',
-      title: 'Mindful rest day',
-      durationMinutes: 0,
-      category: 'rest',
-      note: 'Rest period',
-      isSample: true,
-    };
-  }
-
-  // July 2026 (16 active, 5 rest)
-  const julActiveDays = [2, 4, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31];
-  const julRestDays = [3, 8, 14, 20, 26];
-  for (const day of julActiveDays) {
-    const dStr = `2026-07-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'active',
-      title: '15-min mindful walk',
-      durationMinutes: 15,
-      category: 'walk',
-      note: 'Summer walking routine',
-      isSample: true,
-    };
-  }
-  for (const day of julRestDays) {
-    const dStr = `2026-07-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'rest',
-      title: 'Mindful rest day',
-      durationMinutes: 0,
-      category: 'rest',
-      note: 'Hydration & quiet reset',
-      isSample: true,
-    };
-  }
-
-  // June 2026 (14 active, 4 rest)
-  const junActiveDays = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28];
-  const junRestDays = [5, 11, 17, 23];
-  for (const day of junActiveDays) {
-    const dStr = `2026-06-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'active',
-      title: '15-min mindful walk',
-      durationMinutes: 15,
-      category: 'walk',
-      note: 'Initial habit ramp-up',
-      isSample: true,
-    };
-  }
-  for (const day of junRestDays) {
-    const dStr = `2026-06-${String(day).padStart(2, '0')}`;
-    logs[dStr] = {
-      date: dStr,
-      type: 'rest',
-      title: 'Mindful rest day',
-      durationMinutes: 0,
-      category: 'rest',
-      note: 'Weekend quiet day',
-      isSample: true,
-    };
+    if (i === 1) {
+      logs[dateStr] = {
+        date: dateStr,
+        type: 'active',
+        title: '15-min mindful walk',
+        durationMinutes: 15,
+        category: 'walk',
+        note: 'Unhurried neighborhood walk at 1:15 PM',
+        isSample: true,
+      };
+    } else if (i === 2) {
+      logs[dateStr] = {
+        date: dateStr,
+        type: 'active',
+        title: '5-min gentle stretch',
+        durationMinutes: 5,
+        category: 'stretch',
+        note: 'Afternoon desk shoulder & neck release',
+        isSample: true,
+      };
+    } else if (i === 3) {
+      logs[dateStr] = {
+        date: dateStr,
+        type: 'rest',
+        title: 'Mindful rest day',
+        durationMinutes: 0,
+        category: 'rest',
+        note: 'Autonomic recovery & restorative breathing',
+        isSample: true,
+      };
+    } else {
+      if (dayOfWeek === 0 || i % 7 === 0) {
+        logs[dateStr] = {
+          date: dateStr,
+          type: 'rest',
+          title: 'Mindful rest day',
+          durationMinutes: 0,
+          category: 'rest',
+          note: 'Intentional recovery buffer',
+          isSample: true,
+        };
+      } else if (i % 5 === 0) {
+        // Leave unlogged occasionally
+      } else {
+        const isStretch = i % 3 === 0;
+        logs[dateStr] = {
+          date: dateStr,
+          type: 'active',
+          title: isStretch ? '5-min gentle stretch' : '15-min mindful walk',
+          durationMinutes: isStretch ? 5 : 15,
+          category: isStretch ? 'stretch' : 'walk',
+          note: 'Consistent mid-day movement session',
+          isSample: true,
+        };
+      }
+    }
   }
 
   return logs;
@@ -630,28 +530,33 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
   // ------------------------------------------------------------
   // Activity Module State (Local State, Synchronous Updates)
   // ------------------------------------------------------------
+  const deviceToday = useMemo(() => getDeviceLocalDate(), []);
   const [activityLogs, setActivityLogs] = useState<Record<string, DayActivityRecord>>(generateInitialActivityLogs);
-  const [viewYear, setViewYear] = useState<number>(CURRENT_YEAR); // 2026
-  const [viewMonth, setViewMonth] = useState<number>(CURRENT_MONTH); // 10 (November)
+  const [viewYear, setViewYear] = useState<number>(() => getDeviceLocalDate().year);
+  const [viewMonth, setViewMonth] = useState<number>(() => getDeviceLocalDate().month);
+  const [pickerYear, setPickerYear] = useState<number>(() => getDeviceLocalDate().year);
   const [slideDirection, setSlideDirection] = useState<number>(0); // -1 or 1 for animation
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState<boolean>(false);
   const [activeDayModalDate, setActiveDayModalDate] = useState<string | null>(null);
 
   // Day Detail Draft State for Log / Correct
   const [dayDraftType, setDayDraftType] = useState<ActivityRecordType>('active');
-  const [dayDraftTitle, setDayDraftTitle] = useState<string>('15-min mindful walk');
+  const [dayDraftTitle, setDayDraftTitle] = useState<string>('');
   const [dayDraftDuration, setDayDraftDuration] = useState<number>(15);
   const [dayDraftNote, setDayDraftNote] = useState<string>('');
   const [dayUpdateToast, setDayUpdateToast] = useState<string | null>(null);
 
-  // Touch swipe tracking ref
-  const touchStartXRef = useRef<number | null>(null);
+  // Debounce lock to guarantee strictly one month switch per gesture
+  const isMonthSwitchingRef = useRef<boolean>(false);
 
-  const isCurrentMonth = viewYear === CURRENT_YEAR && viewMonth === CURRENT_MONTH;
+  const isCurrentMonth = viewYear === deviceToday.year && viewMonth === deviceToday.month;
 
-  // Month Switch Handlers (Bounds: June 2026 to December 2026)
+  // Month Switch Handlers (Seamless cross-year wrapping with single-swipe guarantee)
   const handlePrevMonth = () => {
-    if (viewYear === 2026 && viewMonth <= 5) return;
+    if (isMonthSwitchingRef.current) return;
+    isMonthSwitchingRef.current = true;
+    setTimeout(() => { isMonthSwitchingRef.current = false; }, 280);
+
     setSlideDirection(-1);
     if (viewMonth === 0) {
       setViewYear(y => y - 1);
@@ -662,7 +567,10 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
   };
 
   const handleNextMonth = () => {
-    if (viewYear === 2026 && viewMonth >= 11) return;
+    if (isMonthSwitchingRef.current) return;
+    isMonthSwitchingRef.current = true;
+    setTimeout(() => { isMonthSwitchingRef.current = false; }, 280);
+
     setSlideDirection(1);
     if (viewMonth === 11) {
       setViewYear(y => y + 1);
@@ -673,9 +581,12 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
   };
 
   const handleJumpToThisMonth = () => {
-    setSlideDirection(viewMonth > CURRENT_MONTH ? -1 : 1);
-    setViewYear(CURRENT_YEAR);
-    setViewMonth(CURRENT_MONTH);
+    const now = getDeviceLocalDate();
+    setSlideDirection(
+      viewYear > now.year || (viewYear === now.year && viewMonth > now.month) ? -1 : 1
+    );
+    setViewYear(now.year);
+    setViewMonth(now.month);
   };
 
   const handleSelectMonth = (year: number, month: number) => {
@@ -685,19 +596,19 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
     setIsMonthPickerOpen(false);
   };
 
-  // Day Tap Handler: open modal and prefill current day data
+  // Day Tap Handler: open modal and prefill current day data (strictly NO prefill if unrecorded)
   const handleOpenDayDetail = (dateStr: string) => {
     const existing = activityLogs[dateStr];
     setActiveDayModalDate(dateStr);
     if (existing) {
       setDayDraftType(existing.type);
-      setDayDraftTitle(existing.title || (existing.type === 'active' ? '15-min mindful walk' : 'Mindful rest day'));
+      setDayDraftTitle(existing.title || (existing.type === 'active' ? '' : 'Mindful rest day'));
       setDayDraftDuration(existing.durationMinutes || (existing.type === 'active' ? 15 : 0));
       setDayDraftNote(existing.note || '');
     } else {
-      // Default to active walk for rapid 补记
+      // Do NOT prefill any specific movement on unrecorded days
       setDayDraftType('active');
-      setDayDraftTitle('15-min mindful walk');
+      setDayDraftTitle('');
       setDayDraftDuration(15);
       setDayDraftNote('');
     }
@@ -834,7 +745,10 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
             {/* Clickable Month Selector Pill */}
             <button
               type="button"
-              onClick={() => setIsMonthPickerOpen(true)}
+              onClick={() => {
+                setPickerYear(viewYear);
+                setIsMonthPickerOpen(true);
+              }}
               className="flex items-center gap-1 text-[12px] font-semibold text-[#26263F] bg-[#26263F]/[0.05] hover:bg-[#26263F]/[0.09] active:scale-95 px-2.5 py-1 rounded-full transition-all cursor-pointer"
               aria-label="Select month"
             >
@@ -877,23 +791,8 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
           ))}
         </div>
 
-        {/* Compact Monthly Illuminated Dot Grid with Swipe Gestures */}
-        <div 
-          className="relative touch-pan-y select-none overflow-hidden"
-          onTouchStart={(e) => {
-            touchStartXRef.current = e.touches[0].clientX;
-          }}
-          onTouchEnd={(e) => {
-            if (touchStartXRef.current === null) return;
-            const diffX = e.changedTouches[0].clientX - touchStartXRef.current;
-            if (diffX > 45) {
-              handlePrevMonth();
-            } else if (diffX < -45) {
-              handleNextMonth();
-            }
-            touchStartXRef.current = null;
-          }}
-        >
+        {/* Compact Monthly Illuminated Dot Grid with Single Drag Swipe Handler */}
+        <div className="relative select-none overflow-hidden touch-pan-y">
           <motion.div
             key={`${viewYear}-${viewMonth}`}
             initial={{ opacity: 0, x: slideDirection * 24 }}
@@ -917,10 +816,10 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
             {Array.from({ length: daysInCurrentMonth }, (_, i) => i + 1).map((dayNum) => {
               const dStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
               const record = activityLogs[dStr];
-              const isToday = viewYear === CURRENT_YEAR && viewMonth === CURRENT_MONTH && dayNum === CURRENT_DAY;
-              const isFuture = (viewYear > CURRENT_YEAR) || 
-                               (viewYear === CURRENT_YEAR && viewMonth > CURRENT_MONTH) || 
-                               (viewYear === CURRENT_YEAR && viewMonth === CURRENT_MONTH && dayNum > CURRENT_DAY);
+              const isToday = viewYear === deviceToday.year && viewMonth === deviceToday.month && dayNum === deviceToday.day;
+              const isFuture = (viewYear > deviceToday.year) || 
+                               (viewYear === deviceToday.year && viewMonth > deviceToday.month) || 
+                               (viewYear === deviceToday.year && viewMonth === deviceToday.month && dayNum > deviceToday.day);
 
               return (
                 <button
@@ -950,7 +849,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
           </motion.div>
         </div>
 
-        {/* Legend & Gesture Hint */}
+        {/* Legend & Gesture Hint (Numerical stats removed per requirement) */}
         <div className="pt-2 border-t border-[#26263F]/[0.06] flex items-center justify-between text-[11px] text-[#7A7895]">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
@@ -967,19 +866,6 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
             </div>
           </div>
           <span className="text-[10px] text-[#8C8AA3] italic">Swipe to switch month</span>
-        </div>
-
-        {/* Dynamic Month Stats (Synchronous with edits) */}
-        <div className="flex items-center justify-between text-xs text-[#5D5B78] pt-1">
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#5E5BAE]" />
-            <span><strong className="text-[#26263F] font-semibold">{activeDaysCount}</strong> active days</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#E59980]" />
-            <span><strong className="text-[#26263F] font-semibold">{restDaysCount}</strong> mindful rests</span>
-          </div>
-          <span className="text-[#7A7895] font-medium">{totalMinutes}m logged</span>
         </div>
       </section>
 
@@ -1904,7 +1790,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                               .sort((a, b) => b.date.localeCompare(a.date))
                               .map((rec) => {
                                 const dObj = new Date(rec.date + 'T00:00:00');
-                                const isToday = rec.date === TODAY_DATE_STR;
+                                const isToday = rec.date === deviceToday.dateStr;
                                 const dateLabel = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' });
 
                                 return (
@@ -2103,28 +1989,52 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                     </button>
                   </div>
 
-                  <div className="flex flex-col gap-1.5 max-h-[300px] overflow-y-auto pr-0.5">
-                    {AVAILABLE_MONTH_LIST.map((m) => {
-                      const isSelected = m.year === viewYear && m.month === viewMonth;
-                      const mPrefix = `${m.year}-${String(m.month + 1).padStart(2, '0')}`;
+                  {/* Year Switcher for Cross-Year Selection */}
+                  <div className="flex items-center justify-between px-2.5 py-1.5 bg-black/[0.03] rounded-[14px]">
+                    <button
+                      type="button"
+                      onClick={() => setPickerYear(y => y - 1)}
+                      className="px-2.5 py-1 text-xs font-semibold text-[#5E5BAE] hover:bg-black/5 active:scale-95 rounded-[8px] transition-all cursor-pointer"
+                      aria-label="Previous year"
+                    >
+                      ‹ {pickerYear - 1}
+                    </button>
+                    <span className="text-[13px] font-bold text-[#26263F]">
+                      {pickerYear}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPickerYear(y => y + 1)}
+                      className="px-2.5 py-1 text-xs font-semibold text-[#5E5BAE] hover:bg-black/5 active:scale-95 rounded-[8px] transition-all cursor-pointer"
+                      aria-label="Next year"
+                    >
+                      {pickerYear + 1} ›
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 max-h-[280px] overflow-y-auto pr-0.5">
+                    {MONTH_NAMES.map((monthName, idx) => {
+                      const isSelected = pickerYear === viewYear && idx === viewMonth;
+                      const isCurrent = pickerYear === deviceToday.year && idx === deviceToday.month;
+                      const mPrefix = `${pickerYear}-${String(idx + 1).padStart(2, '0')}`;
                       const mRecords = Object.values(activityLogs).filter(r => r.date.startsWith(mPrefix));
                       const mActive = mRecords.filter(r => r.type === 'active').length;
                       const mRest = mRecords.filter(r => r.type === 'rest').length;
 
                       return (
                         <button
-                          key={m.label}
+                          key={`${pickerYear}-${idx}`}
                           type="button"
-                          onClick={() => handleSelectMonth(m.year, m.month)}
-                          className={`w-full p-3 rounded-[16px] text-left flex items-center justify-between transition-all cursor-pointer ${
+                          onClick={() => handleSelectMonth(pickerYear, idx)}
+                          className={`w-full p-2.5 rounded-[16px] text-left flex items-center justify-between transition-all cursor-pointer ${
                             isSelected 
                               ? 'bg-[#5E5BAE] text-white font-bold shadow-sm' 
                               : 'bg-white/75 hover:bg-white text-[#26263F] border border-black/[0.04]'
                           }`}
                         >
                           <div className="flex items-center gap-2">
-                            <span className="text-[13px]">{m.label}</span>
-                            {m.isCurrent && (
+                            <span className="text-[13px]">{monthName}</span>
+                            {isCurrent && (
                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
                                 isSelected ? 'bg-white/20 text-white' : 'bg-[#5E5BAE]/10 text-[#5E5BAE]'
                               }`}>
@@ -2167,8 +2077,10 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
             day: 'numeric',
             year: 'numeric'
           });
-          isSelectedDayToday = activeDayModalDate === TODAY_DATE_STR;
+          isSelectedDayToday = activeDayModalDate === deviceToday.dateStr;
         }
+
+        const isSaveDisabled = dayDraftType === 'active' && !dayDraftTitle.trim();
 
         const dayModalContent = (
           <AnimatePresence>
@@ -2245,7 +2157,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                       )}
                     </div>
                     <div className="text-[13px] font-semibold text-[#26263F] mt-0.5">
-                      {currentRecord?.type === 'active' && (currentRecord.title || '15-min mindful walk')}
+                      {currentRecord?.type === 'active' && (currentRecord.title || 'Active session')}
                       {currentRecord?.type === 'rest' && (currentRecord.title || 'Mindful rest day')}
                       {(!currentRecord || currentRecord.type === 'none') && 'No activity or rest recorded for this day'}
                     </div>
@@ -2268,8 +2180,8 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                         type="button"
                         onClick={() => {
                           setDayDraftType('active');
-                          if (!dayDraftTitle || dayDraftType === 'rest') {
-                            setDayDraftTitle('15-min mindful walk');
+                          if (dayDraftType === 'rest') {
+                            setDayDraftTitle('');
                             setDayDraftDuration(15);
                           }
                         }}
@@ -2367,7 +2279,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                             type="text"
                             value={dayDraftTitle}
                             onChange={(e) => setDayDraftTitle(e.target.value)}
-                            placeholder="e.g. 15-min mindful walk"
+                            placeholder="Select a preset above or type here..."
                             className="w-full px-3 py-2 rounded-[12px] bg-white border border-black/[0.08] text-xs text-[#26263F] focus:outline-none focus:ring-1 focus:ring-[#5E5BAE]"
                           />
                         </div>
@@ -2398,8 +2310,14 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                     )}
                   </div>
 
+                  {isSaveDisabled && (
+                    <p className="text-[11px] text-[#5E5BAE] font-medium text-center">
+                      Select a preset or enter an activity name to save
+                    </p>
+                  )}
+
                   {/* Action Buttons */}
-                  <div className="flex items-center gap-2 pt-2 border-t border-black/[0.05]">
+                  <div className="flex items-center gap-2 pt-1 border-t border-black/[0.05]">
                     <button
                       type="button"
                       onClick={() => setActiveDayModalDate(null)}
@@ -2410,8 +2328,13 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
 
                     <button
                       type="button"
+                      disabled={isSaveDisabled}
                       onClick={handleSaveDayRecord}
-                      className="flex-1 py-2.5 rounded-[14px] bg-[#5E5BAE] hover:bg-[#524FA0] text-xs font-semibold text-white shadow-sm transition-colors cursor-pointer"
+                      className={`flex-1 py-2.5 rounded-[14px] text-xs font-semibold shadow-sm transition-colors ${
+                        isSaveDisabled
+                          ? 'bg-[#5E5BAE]/40 text-white/70 cursor-not-allowed'
+                          : 'bg-[#5E5BAE] hover:bg-[#524FA0] text-white cursor-pointer'
+                      }`}
                     >
                       {dayDraftType === 'none' ? 'Clear Record' : 'Save Record'}
                     </button>
