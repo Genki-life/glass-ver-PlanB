@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -530,7 +530,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
   // ------------------------------------------------------------
   // Activity Module State (Local State, Synchronous Updates)
   // ------------------------------------------------------------
-  const deviceToday = useMemo(() => getDeviceLocalDate(), []);
+  const [deviceToday, setDeviceToday] = useState(getDeviceLocalDate);
   const [activityLogs, setActivityLogs] = useState<Record<string, DayActivityRecord>>(generateInitialActivityLogs);
   const [viewYear, setViewYear] = useState<number>(() => getDeviceLocalDate().year);
   const [viewMonth, setViewMonth] = useState<number>(() => getDeviceLocalDate().month);
@@ -538,6 +538,51 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
   const [slideDirection, setSlideDirection] = useState<number>(0); // -1 or 1 for animation
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState<boolean>(false);
   const [activeDayModalDate, setActiveDayModalDate] = useState<string | null>(null);
+
+  // Automatically refresh deviceToday when crossing local midnight or resuming from background
+  useEffect(() => {
+    const syncLocalDate = () => {
+      const latest = getDeviceLocalDate();
+      setDeviceToday((prev) => {
+        if (prev.dateStr === latest.dateStr) return prev;
+        if (viewYear === prev.year && viewMonth === prev.month) {
+          setViewYear(latest.year);
+          setViewMonth(latest.month);
+        }
+        return latest;
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncLocalDate();
+      }
+    };
+
+    let midnightTimer: ReturnType<typeof setTimeout>;
+    const scheduleMidnightUpdate = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 200);
+      const msUntilMidnight = Math.max(1000, nextMidnight.getTime() - now.getTime());
+      midnightTimer = setTimeout(() => {
+        syncLocalDate();
+        scheduleMidnightUpdate();
+      }, msUntilMidnight);
+    };
+
+    scheduleMidnightUpdate();
+    const intervalId = setInterval(syncLocalDate, 30000);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', syncLocalDate);
+
+    return () => {
+      clearTimeout(midnightTimer);
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', syncLocalDate);
+    };
+  }, [viewYear, viewMonth]);
 
   // Day Detail Draft State for Log / Correct
   const [dayDraftType, setDayDraftType] = useState<ActivityRecordType>('active');
@@ -582,6 +627,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
 
   const handleJumpToThisMonth = () => {
     const now = getDeviceLocalDate();
+    setDeviceToday(now);
     setSlideDirection(
       viewYear > now.year || (viewYear === now.year && viewMonth > now.month) ? -1 : 1
     );
@@ -849,7 +895,7 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
           </motion.div>
         </div>
 
-        {/* Legend & Gesture Hint (Numerical stats removed per requirement) */}
+        {/* Legend & Concise Sample Data Label */}
         <div className="pt-2 border-t border-[#26263F]/[0.06] flex items-center justify-between text-[11px] text-[#7A7895]">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
@@ -865,7 +911,9 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
               <span>No record</span>
             </div>
           </div>
-          <span className="text-[10px] text-[#8C8AA3] italic">Swipe to switch month</span>
+          <span className="text-[10px] font-medium text-[#8C8AA3] bg-[#26263F]/[0.04] px-2 py-0.5 rounded-full">
+            Sample data
+          </span>
         </div>
       </section>
 
