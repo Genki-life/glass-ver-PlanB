@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronRight, 
+  ChevronDown,
   X, 
   Heart, 
   Moon, 
@@ -98,31 +99,225 @@ const RHYTHM_RECENT_DATA: Record<'7d' | 'month', RhythmRecentDataSet> = {
   },
 };
 
-// Activity Week Sample Data
-interface DayActivity {
-  day: number;
-  weekday: string;
-  type: 'walk' | 'stretch' | 'rest' | 'none';
-  label: string;
-}
+// ============================================================
+// Activity Monthly Records Data Model (Real Date Anchor: Nov 4, 2026)
+// ============================================================
+export const CURRENT_YEAR = 2026;
+export const CURRENT_MONTH = 10; // 0-indexed: 10 is November
+export const CURRENT_DAY = 4; // Actual current day: Nov 4, 2026
+export const TODAY_DATE_STR = '2026-11-04';
 
-const SAMPLE_NOVEMBER_DAYS: DayActivity[] = [
-  { day: 1, weekday: 'Sun', type: 'rest', label: 'Mindful rest day' },
-  { day: 2, weekday: 'Mon', type: 'stretch', label: '5-min stretch' },
-  { day: 3, weekday: 'Tue', type: 'walk', label: '15-min walk (Today)' },
-  { day: 4, weekday: 'Wed', type: 'none', label: 'Scheduled' },
-  { day: 5, weekday: 'Thu', type: 'none', label: 'Scheduled' },
-  { day: 6, weekday: 'Fri', type: 'none', label: 'Scheduled' },
-  { day: 7, weekday: 'Sat', type: 'none', label: 'Scheduled' },
+export const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-const PAST_MONTH_STATS = {
-  activeDays: 18,
-  restDays: 4,
-  totalMinutes: 245,
-  avgDuration: '12 min',
-  preferredTime: '1:15 PM',
-};
+export const AVAILABLE_MONTH_LIST = [
+  { year: 2026, month: 5, label: 'June 2026' },
+  { year: 2026, month: 6, label: 'July 2026' },
+  { year: 2026, month: 7, label: 'August 2026' },
+  { year: 2026, month: 8, label: 'September 2026' },
+  { year: 2026, month: 9, label: 'October 2026' },
+  { year: 2026, month: 10, label: 'November 2026', isCurrent: true },
+  { year: 2026, month: 11, label: 'December 2026' },
+];
+
+export type ActivityRecordType = 'active' | 'rest' | 'none';
+
+export interface DayActivityRecord {
+  date: string; // 'YYYY-MM-DD'
+  type: ActivityRecordType;
+  title: string;
+  durationMinutes: number;
+  category?: 'walk' | 'stretch' | 'mobility' | 'rest';
+  note?: string;
+  isSample?: boolean;
+  updatedAt?: string;
+}
+
+export function generateInitialActivityLogs(): Record<string, DayActivityRecord> {
+  const logs: Record<string, DayActivityRecord> = {};
+
+  // November 2026 (Current month, today is Nov 4)
+  logs['2026-11-01'] = {
+    date: '2026-11-01',
+    type: 'rest',
+    title: 'Mindful rest day',
+    durationMinutes: 0,
+    category: 'rest',
+    note: 'Autonomic recovery & restorative breathing',
+    isSample: true,
+  };
+  logs['2026-11-02'] = {
+    date: '2026-11-02',
+    type: 'active',
+    title: '5-min gentle stretch',
+    durationMinutes: 5,
+    category: 'stretch',
+    note: 'Afternoon desk shoulder & neck release',
+    isSample: true,
+  };
+  logs['2026-11-03'] = {
+    date: '2026-11-03',
+    type: 'active',
+    title: '15-min mindful walk',
+    durationMinutes: 15,
+    category: 'walk',
+    note: 'Unhurried neighborhood walk at 1:15 PM',
+    isSample: true,
+  };
+  logs['2026-11-04'] = {
+    date: '2026-11-04',
+    type: 'active',
+    title: '15-min mindful walk (Today)',
+    durationMinutes: 15,
+    category: 'walk',
+    note: 'Completed today at 1:15 PM pacing window',
+    isSample: true,
+  };
+
+  // October 2026 (21 active, 5 rest)
+  const octActiveDays = [1, 2, 4, 5, 7, 8, 9, 11, 12, 14, 15, 16, 18, 19, 21, 22, 23, 25, 26, 28, 29];
+  const octRestDays = [3, 10, 17, 24, 31];
+  for (const day of octActiveDays) {
+    const dStr = `2026-10-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'active',
+      title: day % 2 === 0 ? '15-min mindful walk' : '5-min gentle stretch',
+      durationMinutes: day % 2 === 0 ? 15 : 5,
+      category: day % 2 === 0 ? 'walk' : 'stretch',
+      note: 'Consistent mid-day movement session',
+      isSample: true,
+    };
+  }
+  for (const day of octRestDays) {
+    const dStr = `2026-10-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'rest',
+      title: 'Mindful rest day',
+      durationMinutes: 0,
+      category: 'rest',
+      note: 'Intentional recovery buffer',
+      isSample: true,
+    };
+  }
+
+  // September 2026 (19 active, 4 rest)
+  const sepActiveDays = [1, 2, 4, 5, 7, 8, 9, 11, 12, 14, 15, 16, 18, 19, 22, 23, 25, 26, 29];
+  const sepRestDays = [3, 10, 17, 24];
+  for (const day of sepActiveDays) {
+    const dStr = `2026-09-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'active',
+      title: day % 3 === 0 ? '20-min nature stride' : '15-min mindful walk',
+      durationMinutes: day % 3 === 0 ? 20 : 15,
+      category: 'walk',
+      note: 'Gentle aerobic reset',
+      isSample: true,
+    };
+  }
+  for (const day of sepRestDays) {
+    const dStr = `2026-09-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'rest',
+      title: 'Mindful rest day',
+      durationMinutes: 0,
+      category: 'rest',
+      note: 'Restored energy without guilt',
+      isSample: true,
+    };
+  }
+
+  // August 2026 (15 active, 6 rest)
+  const augActiveDays = [1, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28];
+  const augRestDays = [2, 7, 13, 19, 25, 30];
+  for (const day of augActiveDays) {
+    const dStr = `2026-08-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'active',
+      title: '15-min mindful walk',
+      durationMinutes: 15,
+      category: 'walk',
+      note: 'Morning outdoor pace',
+      isSample: true,
+    };
+  }
+  for (const day of augRestDays) {
+    const dStr = `2026-08-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'rest',
+      title: 'Mindful rest day',
+      durationMinutes: 0,
+      category: 'rest',
+      note: 'Rest period',
+      isSample: true,
+    };
+  }
+
+  // July 2026 (16 active, 5 rest)
+  const julActiveDays = [2, 4, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31];
+  const julRestDays = [3, 8, 14, 20, 26];
+  for (const day of julActiveDays) {
+    const dStr = `2026-07-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'active',
+      title: '15-min mindful walk',
+      durationMinutes: 15,
+      category: 'walk',
+      note: 'Summer walking routine',
+      isSample: true,
+    };
+  }
+  for (const day of julRestDays) {
+    const dStr = `2026-07-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'rest',
+      title: 'Mindful rest day',
+      durationMinutes: 0,
+      category: 'rest',
+      note: 'Hydration & quiet reset',
+      isSample: true,
+    };
+  }
+
+  // June 2026 (14 active, 4 rest)
+  const junActiveDays = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28];
+  const junRestDays = [5, 11, 17, 23];
+  for (const day of junActiveDays) {
+    const dStr = `2026-06-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'active',
+      title: '15-min mindful walk',
+      durationMinutes: 15,
+      category: 'walk',
+      note: 'Initial habit ramp-up',
+      isSample: true,
+    };
+  }
+  for (const day of junRestDays) {
+    const dStr = `2026-06-${String(day).padStart(2, '0')}`;
+    logs[dStr] = {
+      date: dStr,
+      type: 'rest',
+      title: 'Mindful rest day',
+      durationMinutes: 0,
+      category: 'rest',
+      note: 'Weekend quiet day',
+      isSample: true,
+    };
+  }
+
+  return logs;
+}
 
 // ------------------------------------------------------------
 // Direction Preset Goals & State Definition
@@ -432,6 +627,130 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
   // Secondary Detail Sheet Module Selection
   const [selectedModule, setSelectedModule] = useState<'activity' | 'rhythm' | 'direction' | 'health' | null>(null);
 
+  // ------------------------------------------------------------
+  // Activity Module State (Local State, Synchronous Updates)
+  // ------------------------------------------------------------
+  const [activityLogs, setActivityLogs] = useState<Record<string, DayActivityRecord>>(generateInitialActivityLogs);
+  const [viewYear, setViewYear] = useState<number>(CURRENT_YEAR); // 2026
+  const [viewMonth, setViewMonth] = useState<number>(CURRENT_MONTH); // 10 (November)
+  const [slideDirection, setSlideDirection] = useState<number>(0); // -1 or 1 for animation
+  const [isMonthPickerOpen, setIsMonthPickerOpen] = useState<boolean>(false);
+  const [activeDayModalDate, setActiveDayModalDate] = useState<string | null>(null);
+
+  // Day Detail Draft State for Log / Correct
+  const [dayDraftType, setDayDraftType] = useState<ActivityRecordType>('active');
+  const [dayDraftTitle, setDayDraftTitle] = useState<string>('15-min mindful walk');
+  const [dayDraftDuration, setDayDraftDuration] = useState<number>(15);
+  const [dayDraftNote, setDayDraftNote] = useState<string>('');
+  const [dayUpdateToast, setDayUpdateToast] = useState<string | null>(null);
+
+  // Touch swipe tracking ref
+  const touchStartXRef = useRef<number | null>(null);
+
+  const isCurrentMonth = viewYear === CURRENT_YEAR && viewMonth === CURRENT_MONTH;
+
+  // Month Switch Handlers (Bounds: June 2026 to December 2026)
+  const handlePrevMonth = () => {
+    if (viewYear === 2026 && viewMonth <= 5) return;
+    setSlideDirection(-1);
+    if (viewMonth === 0) {
+      setViewYear(y => y - 1);
+      setViewMonth(11);
+    } else {
+      setViewMonth(m => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (viewYear === 2026 && viewMonth >= 11) return;
+    setSlideDirection(1);
+    if (viewMonth === 11) {
+      setViewYear(y => y + 1);
+      setViewMonth(0);
+    } else {
+      setViewMonth(m => m + 1);
+    }
+  };
+
+  const handleJumpToThisMonth = () => {
+    setSlideDirection(viewMonth > CURRENT_MONTH ? -1 : 1);
+    setViewYear(CURRENT_YEAR);
+    setViewMonth(CURRENT_MONTH);
+  };
+
+  const handleSelectMonth = (year: number, month: number) => {
+    setSlideDirection(year > viewYear || (year === viewYear && month > viewMonth) ? 1 : -1);
+    setViewYear(year);
+    setViewMonth(month);
+    setIsMonthPickerOpen(false);
+  };
+
+  // Day Tap Handler: open modal and prefill current day data
+  const handleOpenDayDetail = (dateStr: string) => {
+    const existing = activityLogs[dateStr];
+    setActiveDayModalDate(dateStr);
+    if (existing) {
+      setDayDraftType(existing.type);
+      setDayDraftTitle(existing.title || (existing.type === 'active' ? '15-min mindful walk' : 'Mindful rest day'));
+      setDayDraftDuration(existing.durationMinutes || (existing.type === 'active' ? 15 : 0));
+      setDayDraftNote(existing.note || '');
+    } else {
+      // Default to active walk for rapid 补记
+      setDayDraftType('active');
+      setDayDraftTitle('15-min mindful walk');
+      setDayDraftDuration(15);
+      setDayDraftNote('');
+    }
+  };
+
+  // Save Day Record (Log or Correct) with synchronous state update
+  const handleSaveDayRecord = () => {
+    if (!activeDayModalDate) return;
+
+    setActivityLogs(prev => {
+      const next = { ...prev };
+      if (dayDraftType === 'none') {
+        delete next[activeDayModalDate];
+      } else {
+        next[activeDayModalDate] = {
+          date: activeDayModalDate,
+          type: dayDraftType,
+          title: dayDraftTitle || (dayDraftType === 'active' ? 'Mindful session' : 'Mindful rest day'),
+          durationMinutes: dayDraftType === 'active' ? dayDraftDuration : 0,
+          category: dayDraftType === 'active' ? 'walk' : 'rest',
+          note: dayDraftNote,
+          isSample: false,
+          updatedAt: 'Just now'
+        };
+      }
+      return next;
+    });
+
+    const parsedDate = new Date(activeDayModalDate + 'T00:00:00');
+    const monthAbbr = MONTH_NAMES[parsedDate.getMonth()].slice(0, 3);
+    const dayNum = parsedDate.getDate();
+    const actionLabel = dayDraftType === 'active' 
+      ? `${dayDraftDuration}m active saved` 
+      : dayDraftType === 'rest' 
+      ? 'Rest day saved' 
+      : 'Record cleared';
+
+    setDayUpdateToast(`${monthAbbr} ${dayNum}: ${actionLabel}`);
+    setTimeout(() => setDayUpdateToast(null), 2500);
+    setActiveDayModalDate(null);
+  };
+
+  // Dynamic monthly metrics calculation
+  const currentMonthPrefix = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}`;
+  const currentMonthRecords = Object.values(activityLogs).filter(r => r.date.startsWith(currentMonthPrefix));
+  const activeDaysCount = currentMonthRecords.filter(r => r.type === 'active').length;
+  const restDaysCount = currentMonthRecords.filter(r => r.type === 'rest').length;
+  const totalMinutes = currentMonthRecords.reduce((sum, r) => sum + (r.durationMinutes || (r.type === 'active' ? 15 : 0)), 0);
+
+  // Month days generation for compact grid
+  const daysInCurrentMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay(); // 0 is Sunday
+
   const currentRecentData = RHYTHM_RECENT_DATA[rhythmFilter];
 
   // Helper to start editing direction with a clean cloned draft
@@ -483,69 +802,184 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
         )}
       </AnimatePresence>
 
+      {/* Day Update Toast Banner */}
+      <AnimatePresence>
+        {dayUpdateToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="bg-[#5E5BAE] text-white px-4 py-2.5 rounded-[18px] text-xs font-semibold shadow-md flex items-center justify-between z-20 shrink-0"
+          >
+            <div className="flex items-center gap-2">
+              <Check className="w-4 h-4 stroke-[2.5]" />
+              <span>{dayUpdateToast}</span>
+            </div>
+            <span className="text-[11px] text-white/80">Updated</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ============================================================ */}
-      {/* 1. Module: Activity (Monthly action records)                  */}
+      {/* 1. Module: Activity (Compact Illuminated Monthly Grid)       */}
       {/* ============================================================ */}
       <section 
-        onClick={() => setSelectedModule('activity')}
-        className="group bg-white/70 hover:bg-white/85 transition-all duration-200 backdrop-blur-md rounded-[24px] p-5 border border-white/80 shadow-[0_4px_20px_rgba(90,80,140,0.04)] cursor-pointer flex flex-col gap-3.5 relative"
-        role="button"
-        tabIndex={0}
-        aria-label="View Activity details"
-        onKeyDown={(e) => e.key === 'Enter' && setSelectedModule('activity')}
+        className="bg-white/70 backdrop-blur-md rounded-[24px] p-5 border border-white/80 shadow-[0_4px_20px_rgba(90,80,140,0.04)] flex flex-col gap-3 relative"
+        aria-label="Activity Monthly Records"
       >
+        {/* Module Header & Month Switcher (No < > or + buttons!) */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-[17px] font-bold text-[#26263F] tracking-tight">Activity</span>
-            <span className="text-[12px] font-medium text-[#7A7895] bg-[#26263F]/[0.04] px-2.5 py-0.5 rounded-full">
-              November 2026
-            </span>
+            {/* Clickable Month Selector Pill */}
+            <button
+              type="button"
+              onClick={() => setIsMonthPickerOpen(true)}
+              className="flex items-center gap-1 text-[12px] font-semibold text-[#26263F] bg-[#26263F]/[0.05] hover:bg-[#26263F]/[0.09] active:scale-95 px-2.5 py-1 rounded-full transition-all cursor-pointer"
+              aria-label="Select month"
+            >
+              <span>{MONTH_NAMES[viewMonth]} {viewYear}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-[#5E5BAE] opacity-75" />
+            </button>
           </div>
-          <div className="flex items-center text-xs font-semibold text-[#5E5BAE] group-hover:translate-x-0.5 transition-transform">
-            <span>Details</span>
-            <ChevronRight className="w-4 h-4 ml-0.5 stroke-[2.2]" />
-          </div>
-        </div>
 
-        {/* Minimal Monthly Week Strip */}
-        <div className="grid grid-cols-7 gap-1.5 pt-1">
-          {SAMPLE_NOVEMBER_DAYS.map((item) => {
-            const isToday = item.day === 3;
-            return (
-              <div 
-                key={item.day}
-                className={`flex flex-col items-center py-2 px-1 rounded-[16px] transition-colors ${
-                  isToday 
-                    ? 'bg-[#5E5BAE]/10 border border-[#5E5BAE]/30 font-semibold' 
-                    : 'bg-white/50 border border-white/60'
-                }`}
+          <div className="flex items-center gap-2">
+            {!isCurrentMonth ? (
+              <button
+                type="button"
+                onClick={handleJumpToThisMonth}
+                className="flex items-center gap-1 text-[11px] font-semibold text-[#5E5BAE] bg-[#5E5BAE]/10 hover:bg-[#5E5BAE]/18 active:scale-95 px-2.5 py-1 rounded-full transition-all cursor-pointer"
+                aria-label="Return to this month"
               >
-                <span className="text-[10px] text-[#7A7895] uppercase tracking-wider">{item.weekday}</span>
-                <span className={`text-[13px] mt-0.5 ${isToday ? 'text-[#5E5BAE] font-bold' : 'text-[#26263F]'}`}>
-                  {item.day}
-                </span>
-                
-                <div className="mt-1.5 w-2 h-2 rounded-full flex items-center justify-center">
-                  {item.type === 'walk' && <div className="w-2 h-2 rounded-full bg-[#5E5BAE]" />}
-                  {item.type === 'stretch' && <div className="w-2 h-2 rounded-full bg-[#8E8CD6]" />}
-                  {item.type === 'rest' && <div className="w-2 h-2 rounded-full bg-[#E59980]" />}
-                  {item.type === 'none' && <div className="w-1.5 h-1.5 rounded-full bg-[#26263F]/15" />}
-                </div>
-              </div>
-            );
-          })}
+                <RotateCcw className="w-3 h-3 stroke-[2.2]" />
+                <span>This month</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSelectedModule('activity')}
+                className="flex items-center text-xs font-semibold text-[#5E5BAE] hover:translate-x-0.5 transition-transform cursor-pointer"
+                aria-label="View Activity history"
+              >
+                <span>History</span>
+                <ChevronRight className="w-4 h-4 ml-0.5 stroke-[2.2]" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="pt-2 border-t border-[#26263F]/[0.06] flex items-center justify-between text-xs text-[#5D5B78]">
+        {/* Weekday indicators */}
+        <div className="grid grid-cols-7 gap-1.5 text-center select-none pt-0.5">
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dayInitial, idx) => (
+            <span key={idx} className="text-[9.5px] font-bold text-[#8C8AA3] uppercase tracking-wider">
+              {dayInitial}
+            </span>
+          ))}
+        </div>
+
+        {/* Compact Monthly Illuminated Dot Grid with Swipe Gestures */}
+        <div 
+          className="relative touch-pan-y select-none overflow-hidden"
+          onTouchStart={(e) => {
+            touchStartXRef.current = e.touches[0].clientX;
+          }}
+          onTouchEnd={(e) => {
+            if (touchStartXRef.current === null) return;
+            const diffX = e.changedTouches[0].clientX - touchStartXRef.current;
+            if (diffX > 45) {
+              handlePrevMonth();
+            } else if (diffX < -45) {
+              handleNextMonth();
+            }
+            touchStartXRef.current = null;
+          }}
+        >
+          <motion.div
+            key={`${viewYear}-${viewMonth}`}
+            initial={{ opacity: 0, x: slideDirection * 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.15}
+            onDragEnd={(_, info) => {
+              if (info.offset.x > 40) handlePrevMonth();
+              else if (info.offset.x < -40) handleNextMonth();
+            }}
+            className="grid grid-cols-7 gap-1.5 cursor-grab active:cursor-grabbing py-1"
+          >
+            {/* Empty prefix slots before the 1st day */}
+            {Array.from({ length: firstDayOfWeek }).map((_, idx) => (
+              <div key={`empty-prefix-${idx}`} className="aspect-square w-full" />
+            ))}
+
+            {/* Illuminated day cells - strictly NO numbers or counts inside */}
+            {Array.from({ length: daysInCurrentMonth }, (_, i) => i + 1).map((dayNum) => {
+              const dStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+              const record = activityLogs[dStr];
+              const isToday = viewYear === CURRENT_YEAR && viewMonth === CURRENT_MONTH && dayNum === CURRENT_DAY;
+              const isFuture = (viewYear > CURRENT_YEAR) || 
+                               (viewYear === CURRENT_YEAR && viewMonth > CURRENT_MONTH) || 
+                               (viewYear === CURRENT_YEAR && viewMonth === CURRENT_MONTH && dayNum > CURRENT_DAY);
+
+              return (
+                <button
+                  type="button"
+                  key={dStr}
+                  onClick={() => handleOpenDayDetail(dStr)}
+                  aria-label={`${dStr}: ${record?.type || 'no record'}`}
+                  className={`aspect-square w-full max-w-[34px] mx-auto rounded-[8px] flex items-center justify-center transition-all duration-150 relative cursor-pointer active:scale-88 ${
+                    isToday ? 'ring-2 ring-[#5E5BAE] ring-offset-2 ring-offset-white/80' : ''
+                  } ${
+                    record?.type === 'active'
+                      ? 'bg-[#5E5BAE] shadow-[0_2px_8px_rgba(94,91,174,0.32)] hover:brightness-105'
+                      : record?.type === 'rest'
+                      ? 'bg-[#E59980] shadow-[0_2px_8px_rgba(229,153,128,0.32)] hover:brightness-105'
+                      : isFuture
+                      ? 'bg-[#26263F]/[0.025] border border-dashed border-[#26263F]/15 hover:bg-[#26263F]/[0.08]'
+                      : 'bg-[#26263F]/[0.07] hover:bg-[#26263F]/[0.14]'
+                  }`}
+                >
+                  {/* Subtle white micro-dot to denote today without displaying numbers */}
+                  {isToday && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white absolute top-1 right-1 shadow-xs pointer-events-none" />
+                  )}
+                </button>
+              );
+            })}
+          </motion.div>
+        </div>
+
+        {/* Legend & Gesture Hint */}
+        <div className="pt-2 border-t border-[#26263F]/[0.06] flex items-center justify-between text-[11px] text-[#7A7895]">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-[4px] bg-[#5E5BAE]" />
+              <span className="text-[#26263F] font-medium">Active</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-[4px] bg-[#E59980]" />
+              <span className="text-[#26263F] font-medium">Rest</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-[4px] bg-[#26263F]/15" />
+              <span>No record</span>
+            </div>
+          </div>
+          <span className="text-[10px] text-[#8C8AA3] italic">Swipe to switch month</span>
+        </div>
+
+        {/* Dynamic Month Stats (Synchronous with edits) */}
+        <div className="flex items-center justify-between text-xs text-[#5D5B78] pt-1">
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#5E5BAE]" />
-            <span><strong className="text-[#26263F] font-semibold">{PAST_MONTH_STATS.activeDays}</strong> active days</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-[#5E5BAE]" />
+            <span><strong className="text-[#26263F] font-semibold">{activeDaysCount}</strong> active days</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#E59980]" />
-            <span><strong className="text-[#26263F] font-semibold">{PAST_MONTH_STATS.restDays}</strong> restorative rests</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-[#E59980]" />
+            <span><strong className="text-[#26263F] font-semibold">{restDaysCount}</strong> mindful rests</span>
           </div>
-          <span className="text-[#7A7895]">Total: {PAST_MONTH_STATS.totalMinutes}m</span>
+          <span className="text-[#7A7895] font-medium">{totalMinutes}m logged</span>
         </div>
       </section>
 
@@ -1406,28 +1840,131 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
                   {/* SECONDARY PAGE 4: ACTIVITY HISTORY (Placeholder)        */}
                   {/* ======================================================= */}
                   {selectedModule === 'activity' && (
-                    <div className="flex flex-col gap-3 text-xs text-[#5D5B78]">
-                      <p className="leading-relaxed">
-                        Here you will be able to review all past Plan B completions, gentle walk routes, and logged rest intervals by date.
-                      </p>
-                      <div className="bg-white/70 p-4 rounded-[20px] border border-white/80 flex flex-col gap-2.5">
-                        <span className="font-semibold text-[#26263F]">Recent Action Log</span>
-                        <div className="flex justify-between py-1.5 border-b border-black/[0.04]">
-                          <span>Today, Nov 3</span>
-                          <strong className="text-[#5E5BAE]">15-min walk • Completed</strong>
+                    <div className="flex flex-col gap-4 text-xs text-[#5D5B78]">
+                      {/* Month Summary Card */}
+                      <div className="p-4 rounded-[22px] bg-white/75 border border-white/85 flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-[#5E5BAE]/10 text-[#5E5BAE] flex items-center justify-center font-bold">
+                              <CalendarIcon className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-[14px] font-bold text-[#26263F]">
+                                {MONTH_NAMES[viewMonth]} {viewYear}
+                              </h4>
+                              <span className="text-[11px] text-[#7A7895]">
+                                Monthly pacing & log overview
+                              </span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsMonthPickerOpen(true)}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold bg-[#5E5BAE]/10 hover:bg-[#5E5BAE]/20 text-[#5E5BAE] transition-all cursor-pointer"
+                          >
+                            Switch month
+                          </button>
                         </div>
-                        <div className="flex justify-between py-1.5 border-b border-black/[0.04]">
-                          <span>Yesterday, Nov 2</span>
-                          <strong className="text-[#5E5BAE]">5-min stretch • Completed</strong>
-                        </div>
-                        <div className="flex justify-between py-1.5">
-                          <span>Sunday, Nov 1</span>
-                          <strong className="text-[#E59980]">Mindful rest day • Logged</strong>
+
+                        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-black/[0.04] text-center">
+                          <div className="bg-[#FAF8FD] p-2.5 rounded-[14px]">
+                            <span className="text-[16px] font-bold text-[#5E5BAE] block leading-none">{activeDaysCount}</span>
+                            <span className="text-[10px] text-[#7A7895] mt-0.5 block">active days</span>
+                          </div>
+                          <div className="bg-[#FAF8FD] p-2.5 rounded-[14px]">
+                            <span className="text-[16px] font-bold text-[#E59980] block leading-none">{restDaysCount}</span>
+                            <span className="text-[10px] text-[#7A7895] mt-0.5 block">mindful rests</span>
+                          </div>
+                          <div className="bg-[#FAF8FD] p-2.5 rounded-[14px]">
+                            <span className="text-[16px] font-bold text-[#26263F] block leading-none">{totalMinutes}m</span>
+                            <span className="text-[10px] text-[#7A7895] mt-0.5 block">logged</span>
+                          </div>
                         </div>
                       </div>
-                      <div className="bg-[#5E5BAE]/[0.08] p-3 rounded-[16px] border border-[#5E5BAE]/20 text-xs text-[#5E5BAE] flex items-center gap-2">
-                        <Check className="w-4 h-4 stroke-[2.5] shrink-0" />
-                        <span>Reserved entry point for secondary page expansion.</span>
+
+                      {/* Logged Records List */}
+                      <div className="flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-[#26263F] text-xs">
+                            Recorded Actions & Rests ({currentMonthRecords.length})
+                          </span>
+                          <span className="text-[10.5px] text-[#7A7895]">
+                            Tap edit to correct
+                          </span>
+                        </div>
+
+                        {currentMonthRecords.length === 0 ? (
+                          <div className="p-6 text-center rounded-[20px] bg-white/60 border border-black/[0.04] text-[#7A7895]">
+                            No activity or rest recorded yet for this month. Tap any day on the calendar grid to log an action.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {[...currentMonthRecords]
+                              .sort((a, b) => b.date.localeCompare(a.date))
+                              .map((rec) => {
+                                const dObj = new Date(rec.date + 'T00:00:00');
+                                const isToday = rec.date === TODAY_DATE_STR;
+                                const dateLabel = dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', weekday: 'short' });
+
+                                return (
+                                  <div
+                                    key={rec.date}
+                                    className="p-3.5 rounded-[18px] bg-white/80 border border-white/90 flex items-center justify-between shadow-2xs gap-3"
+                                  >
+                                    <div className="flex items-start gap-2.5 min-w-0">
+                                      <div className={`w-3 h-3 rounded-[4px] mt-1 shrink-0 ${
+                                        rec.type === 'active' ? 'bg-[#5E5BAE]' : 'bg-[#E59980]'
+                                      }`} />
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="font-bold text-[#26263F] text-[13px]">
+                                            {dateLabel}
+                                          </span>
+                                          {isToday && (
+                                            <span className="bg-[#5E5BAE] text-white text-[9.5px] px-1.5 py-0.2 rounded-full font-bold">
+                                              Today
+                                            </span>
+                                          )}
+                                          {rec.isSample && (
+                                            <span className="text-[9.5px] text-[#7A7895] bg-black/[0.04] px-1.5 py-0.2 rounded-full">
+                                              Sample
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-[12px] text-[#5D5B78] mt-0.5 truncate">
+                                          {rec.type === 'active' ? (
+                                            <span>{rec.title} • {rec.durationMinutes}m</span>
+                                          ) : (
+                                            <span>{rec.title || 'Mindful rest day'}</span>
+                                          )}
+                                        </div>
+                                        {rec.note && (
+                                          <div className="text-[11px] text-[#8E8EA8] mt-0.5 italic truncate">
+                                            “{rec.note}”
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenDayDetail(rec.date)}
+                                      className="px-2.5 py-1 rounded-[10px] bg-black/[0.04] hover:bg-black/[0.08] text-[11px] font-semibold text-[#5E5BAE] shrink-0 transition-colors cursor-pointer"
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Prototype Transparency Notice */}
+                      <div className="p-3.5 rounded-[18px] bg-[#5E5BAE]/[0.08] border border-[#5E5BAE]/20 text-[11px] text-[#5E5BAE] flex items-start gap-2">
+                        <Check className="w-4 h-4 stroke-[2.2] shrink-0 mt-0.5" />
+                        <span>All activity logs and adjustments are saved to local state and update the illuminated grid in real-time.</span>
                       </div>
                     </div>
                   )}
@@ -1526,6 +2063,369 @@ export function MyPlanView({ phoneFrameRef }: MyPlanViewProps) {
           return createPortal(infoModalContent, phoneFrameRef.current);
         }
         return infoModalContent;
+      })()}
+
+      {/* ============================================================ */}
+      {/* Month Picker Modal (June 2026 – December 2026)               */}
+      {/* ============================================================ */}
+      {(() => {
+        const monthPickerModalContent = (
+          <AnimatePresence>
+            {isMonthPickerOpen && (
+              <div className="absolute inset-0 z-60 flex items-center justify-center p-5 pointer-events-auto">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsMonthPickerOpen(false)}
+                  className="absolute inset-0 bg-black/35 backdrop-blur-xs"
+                />
+
+                <motion.div
+                  initial={{ scale: 0.94, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.94, opacity: 0 }}
+                  transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+                  className="relative bg-[#FAF8FD] rounded-[26px] p-5 border border-white/95 shadow-2xl z-10 w-full max-w-[325px] flex flex-col gap-3 text-[#26263F]"
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-[#26263F]/[0.06]">
+                    <div className="flex items-center gap-1.5">
+                      <CalendarIcon className="w-4 h-4 text-[#5E5BAE]" />
+                      <h4 className="text-[15px] font-bold text-[#26263F]">Select Month</h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsMonthPickerOpen(false)}
+                      className="w-7 h-7 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-[#26263F] cursor-pointer"
+                      aria-label="Close"
+                    >
+                      <X className="w-3.5 h-3.5 stroke-[2.2]" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 max-h-[300px] overflow-y-auto pr-0.5">
+                    {AVAILABLE_MONTH_LIST.map((m) => {
+                      const isSelected = m.year === viewYear && m.month === viewMonth;
+                      const mPrefix = `${m.year}-${String(m.month + 1).padStart(2, '0')}`;
+                      const mRecords = Object.values(activityLogs).filter(r => r.date.startsWith(mPrefix));
+                      const mActive = mRecords.filter(r => r.type === 'active').length;
+                      const mRest = mRecords.filter(r => r.type === 'rest').length;
+
+                      return (
+                        <button
+                          key={m.label}
+                          type="button"
+                          onClick={() => handleSelectMonth(m.year, m.month)}
+                          className={`w-full p-3 rounded-[16px] text-left flex items-center justify-between transition-all cursor-pointer ${
+                            isSelected 
+                              ? 'bg-[#5E5BAE] text-white font-bold shadow-sm' 
+                              : 'bg-white/75 hover:bg-white text-[#26263F] border border-black/[0.04]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[13px]">{m.label}</span>
+                            {m.isCurrent && (
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                isSelected ? 'bg-white/20 text-white' : 'bg-[#5E5BAE]/10 text-[#5E5BAE]'
+                              }`}>
+                                Current
+                              </span>
+                            )}
+                          </div>
+                          <span className={`text-[11px] ${isSelected ? 'text-white/80' : 'text-[#7A7895]'}`}>
+                            {mActive} active • {mRest} rest
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+        );
+
+        if (phoneFrameRef?.current) {
+          return createPortal(monthPickerModalContent, phoneFrameRef.current);
+        }
+        return monthPickerModalContent;
+      })()}
+
+      {/* ============================================================ */}
+      {/* Day Detail & Correction Modal (Log, Correct, or Clear Record) */}
+      {/* ============================================================ */}
+      {(() => {
+        const currentRecord = activeDayModalDate ? activityLogs[activeDayModalDate] : null;
+        let formattedDateString = '';
+        let isSelectedDayToday = false;
+
+        if (activeDayModalDate) {
+          const dObj = new Date(activeDayModalDate + 'T00:00:00');
+          formattedDateString = dObj.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+          });
+          isSelectedDayToday = activeDayModalDate === TODAY_DATE_STR;
+        }
+
+        const dayModalContent = (
+          <AnimatePresence>
+            {activeDayModalDate && (
+              <div className="absolute inset-0 z-60 flex items-center justify-center p-5 pointer-events-auto">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setActiveDayModalDate(null)}
+                  className="absolute inset-0 bg-black/40 backdrop-blur-xs"
+                />
+
+                <motion.div
+                  initial={{ scale: 0.94, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.94, opacity: 0 }}
+                  transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+                  className="relative bg-[#FAF7F2] rounded-[26px] p-5 border border-white/95 shadow-2xl z-10 w-full max-w-[340px] flex flex-col gap-3.5 text-[#26263F] max-h-[88%] overflow-y-auto"
+                >
+                  {/* Modal Header */}
+                  <div className="flex items-start justify-between pb-2 border-b border-[#26263F]/[0.06]">
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="text-[15px] font-bold text-[#26263F]">
+                          {formattedDateString}
+                        </h4>
+                        {isSelectedDayToday && (
+                          <span className="bg-[#5E5BAE] text-white text-[9.5px] px-2 py-0.5 rounded-full font-bold">
+                            Today
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-[#7A7895] block mt-0.5">
+                        {currentRecord?.isSample
+                          ? 'Sample record • Demo data'
+                          : currentRecord
+                          ? 'Logged in local session'
+                          : 'No record yet • Tap below to log'}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveDayModalDate(null)}
+                      className="w-7 h-7 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-[#26263F] cursor-pointer shrink-0"
+                      aria-label="Close"
+                    >
+                      <X className="w-3.5 h-3.5 stroke-[2.2]" />
+                    </button>
+                  </div>
+
+                  {/* Current Status Card */}
+                  <div className={`p-3.5 rounded-[18px] border flex flex-col gap-1 ${
+                    currentRecord?.type === 'active'
+                      ? 'bg-[#5E5BAE]/[0.08] border-[#5E5BAE]/20 text-[#26263F]'
+                      : currentRecord?.type === 'rest'
+                      ? 'bg-[#E59980]/15 border-[#E59980]/30 text-[#26263F]'
+                      : 'bg-black/[0.03] border-black/[0.05] text-[#7A7895]'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#7A7895]">
+                        Current Record Status
+                      </span>
+                      {currentRecord?.type === 'active' && (
+                        <span className="text-[11px] font-bold text-[#5E5BAE]">
+                          {currentRecord.durationMinutes} min active
+                        </span>
+                      )}
+                      {currentRecord?.type === 'rest' && (
+                        <span className="text-[11px] font-bold text-[#E59980]">
+                          Mindful rest
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[13px] font-semibold text-[#26263F] mt-0.5">
+                      {currentRecord?.type === 'active' && (currentRecord.title || '15-min mindful walk')}
+                      {currentRecord?.type === 'rest' && (currentRecord.title || 'Mindful rest day')}
+                      {(!currentRecord || currentRecord.type === 'none') && 'No activity or rest recorded for this day'}
+                    </div>
+                    {currentRecord?.note && (
+                      <p className="text-[11.5px] text-[#5D5B78] italic mt-0.5">
+                        “{currentRecord.note}”
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Log or Correct Record (补记 / 纠正) */}
+                  <div className="flex flex-col gap-2.5">
+                    <span className="text-xs font-bold text-[#26263F]">
+                      Log or Correct Record
+                    </span>
+
+                    {/* Segmented Type Selection */}
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-black/[0.04] rounded-[16px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDayDraftType('active');
+                          if (!dayDraftTitle || dayDraftType === 'rest') {
+                            setDayDraftTitle('15-min mindful walk');
+                            setDayDraftDuration(15);
+                          }
+                        }}
+                        className={`py-1.5 rounded-[12px] text-xs font-semibold transition-all cursor-pointer ${
+                          dayDraftType === 'active'
+                            ? 'bg-[#5E5BAE] text-white shadow-xs'
+                            : 'text-[#7A7895] hover:text-[#26263F]'
+                        }`}
+                      >
+                        Active
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDayDraftType('rest');
+                          setDayDraftTitle('Mindful rest day');
+                          setDayDraftDuration(0);
+                        }}
+                        className={`py-1.5 rounded-[12px] text-xs font-semibold transition-all cursor-pointer ${
+                          dayDraftType === 'rest'
+                            ? 'bg-[#E59980] text-white shadow-xs'
+                            : 'text-[#7A7895] hover:text-[#26263F]'
+                        }`}
+                      >
+                        Rest
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDayDraftType('none')}
+                        className={`py-1.5 rounded-[12px] text-xs font-semibold transition-all cursor-pointer ${
+                          dayDraftType === 'none'
+                            ? 'bg-white text-[#26263F] shadow-xs'
+                            : 'text-[#7A7895] hover:text-[#26263F]'
+                        }`}
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    {/* Options for Active Movement */}
+                    {dayDraftType === 'active' && (
+                      <div className="flex flex-col gap-2 pt-1">
+                        <span className="text-[11px] font-medium text-[#7A7895]">Quick Presets</span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {[
+                            { title: '15-min mindful walk', dur: 15 },
+                            { title: '5-min desk stretch', dur: 5 },
+                            { title: '20-min nature stride', dur: 20 },
+                            { title: '10-min breath reset', dur: 10 },
+                          ].map((preset) => (
+                            <button
+                              key={preset.title}
+                              type="button"
+                              onClick={() => {
+                                setDayDraftTitle(preset.title);
+                                setDayDraftDuration(preset.dur);
+                              }}
+                              className={`p-2 rounded-[12px] text-left text-[11px] font-semibold border transition-all cursor-pointer ${
+                                dayDraftTitle === preset.title
+                                  ? 'bg-[#5E5BAE]/10 border-[#5E5BAE] text-[#5E5BAE]'
+                                  : 'bg-white/70 border-black/[0.05] text-[#26263F] hover:bg-white'
+                              }`}
+                            >
+                              <div className="truncate">{preset.title}</div>
+                              <span className="text-[10px] text-[#7A7895] block mt-0.5">{preset.dur} min</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-col gap-1 mt-1">
+                          <label className="text-[11px] font-medium text-[#7A7895]">Duration</label>
+                          <div className="flex items-center gap-1.5">
+                            {[5, 10, 15, 20, 30].map((dur) => (
+                              <button
+                                key={dur}
+                                type="button"
+                                onClick={() => setDayDraftDuration(dur)}
+                                className={`flex-1 py-1 rounded-[10px] text-xs font-semibold border transition-all cursor-pointer ${
+                                  dayDraftDuration === dur
+                                    ? 'bg-[#5E5BAE] text-white border-[#5E5BAE]'
+                                    : 'bg-white/70 text-[#26263F] border-black/[0.05] hover:bg-white'
+                                }`}
+                              >
+                                {dur}m
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1 mt-1">
+                          <label className="text-[11px] font-medium text-[#7A7895]">Activity Title</label>
+                          <input
+                            type="text"
+                            value={dayDraftTitle}
+                            onChange={(e) => setDayDraftTitle(e.target.value)}
+                            placeholder="e.g. 15-min mindful walk"
+                            className="w-full px-3 py-2 rounded-[12px] bg-white border border-black/[0.08] text-xs text-[#26263F] focus:outline-none focus:ring-1 focus:ring-[#5E5BAE]"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Options for Mindful Rest */}
+                    {dayDraftType === 'rest' && (
+                      <div className="p-3 rounded-[16px] bg-[#E59980]/15 border border-[#E59980]/30 text-[11.5px] leading-relaxed text-[#26263F]">
+                        <p>
+                          <strong>Rest is an active health choice.</strong> In Plan B, restorative days count toward your consistent wellbeing and prevent cumulative fatigue.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Note input for both active and rest */}
+                    {dayDraftType !== 'none' && (
+                      <div className="flex flex-col gap-1 mt-1">
+                        <label className="text-[11px] font-medium text-[#7A7895]">Note (Optional)</label>
+                        <input
+                          type="text"
+                          value={dayDraftNote}
+                          onChange={(e) => setDayDraftNote(e.target.value)}
+                          placeholder="e.g. Followed Plan B pacing calmly"
+                          className="w-full px-3 py-2 rounded-[12px] bg-white border border-black/[0.08] text-xs text-[#26263F] focus:outline-none focus:ring-1 focus:ring-[#5E5BAE]"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-black/[0.05]">
+                    <button
+                      type="button"
+                      onClick={() => setActiveDayModalDate(null)}
+                      className="flex-1 py-2.5 rounded-[14px] bg-black/5 hover:bg-black/10 text-xs font-semibold text-[#26263F] transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveDayRecord}
+                      className="flex-1 py-2.5 rounded-[14px] bg-[#5E5BAE] hover:bg-[#524FA0] text-xs font-semibold text-white shadow-sm transition-colors cursor-pointer"
+                    >
+                      {dayDraftType === 'none' ? 'Clear Record' : 'Save Record'}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+        );
+
+        if (phoneFrameRef?.current) {
+          return createPortal(dayModalContent, phoneFrameRef.current);
+        }
+        return dayModalContent;
       })()}
 
     </div>
